@@ -23,12 +23,15 @@ export function effectivePermission(item: { permission?: Permission }, layer: La
 
 /**
  * En modo construcción el DM mueve todo lo que no esté en una capa bloqueada.
- * En modo partida se respeta el permiso: lo inamovible no se arrastra.
+ * En modo juego los tokens de la party no se mueven sin querer (sólo forzando, con Alt).
  */
-export function canMove(item: Placement, layer: Layer, mode: 'edit' | 'play'): boolean {
+export function canMove(item: Placement, layer: Layer, mode: 'edit' | 'play', opts: { partyIds?: Set<string>; force?: boolean } = {}): boolean {
   if (layer.locked) return false
   if (mode === 'edit') return true
-  return effectivePermission(item, layer) !== 'static'
+  // En juego el DM acomoda objetos, NPCs y marcas, pero los personajes de los jugadores
+  // quedan quietos para no moverlos sin querer (Alt+arrastrar los mueve igual).
+  if (item.characterId && opts.partyIds?.has(item.characterId)) return !!opts.force
+  return true
 }
 
 export function footprintContains(p: Placement, x: number, y: number): boolean {

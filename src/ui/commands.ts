@@ -9,18 +9,19 @@ const S = () => useMap.getState()
 
 /** Ids seleccionados que se pueden mover en el modo actual. Avisa si alguno quedó afuera. */
 function movableSelection(): string[] {
-  const { selection, doc, mode } = S()
+  const { selection, doc, mode, campaign } = S()
   if (selection.type !== 'items') return []
+  const partyIds = new Set(campaign.party.map((p) => p.id))
   const ok: string[] = []
   let blocked = false
   for (const l of doc.layers) {
     for (const it of l.items ?? []) {
       if (!selection.ids.includes(it.id)) continue
-      if (canMove(it, l, mode)) ok.push(it.id)
+      if (canMove(it, l, mode, { partyIds })) ok.push(it.id)
       else blocked = true
     }
   }
-  if (blocked) S().toast('Hay objetos inamovibles en la selección: se dejaron como estaban.')
+  if (blocked) S().toast('Los personajes de los jugadores no se tocan en modo juego: se dejaron como estaban.')
   return ok
 }
 

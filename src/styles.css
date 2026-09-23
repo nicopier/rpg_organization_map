@@ -318,6 +318,7 @@ h4 {
   position: relative;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: #1b1d22;
 }
 .canvas-host {
@@ -2001,5 +2002,184 @@ span.init {
   }
   .seats code {
     display: none;
+  }
+}
+
+/* ---------- Árbol de mapas ---------- */
+
+.tree {
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.tree.drop-root {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.tree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding-right: 4px;
+  border-radius: 6px;
+}
+.tree-row.folder {
+  color: var(--muted);
+  margin-top: 4px;
+}
+.tree-row.folder:hover {
+  background: var(--panel-2);
+}
+.tree-row.folder .zone-name {
+  flex: 1;
+}
+.tree-row:hover .row-menu {
+  opacity: 1;
+}
+.tree-row.dragging {
+  opacity: 0.4;
+}
+.tree-row.drop-inside {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.tree-row.drop-before::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.tree-spacer {
+  width: 22px;
+  flex: none;
+}
+.tree-empty {
+  margin: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.tree-add {
+  display: flex;
+  gap: 6px;
+  margin: 10px 4px 12px;
+}
+.tree-add button {
+  flex: 1;
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+.tree-hint {
+  margin: 0 4px 12px;
+}
+
+/* ---------- Elegir a quién traer ---------- */
+
+.party-list li.picked {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.party-list li.here.picked {
+  box-shadow: inset 2px 0 0 var(--ok), inset 0 0 0 1px var(--accent);
+}
+.party-list input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.party-list .who {
+  min-width: 0;
+}
+.party-list .where {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Congelar movimiento ---------- */
+
+.pill.freeze.on {
+  background: rgba(229, 72, 77, 0.16);
+  border-color: var(--danger);
+  color: #ff8a8d;
+}
+.icon-btn.locked {
+  color: #ff8a8d;
+}
+.banner.frozen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(229, 72, 77, 0.9);
+  color: #fff;
+}
+
+/* ---------- Paneles plegables ---------- */
+
+.workspace:not(.player-layout) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.side.left.maps-panel {
+  width: 240px;
+}
+.side.left.folded {
+  width: 40px;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+.folded-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 0;
+  max-height: 60vh;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folded-name:hover {
+  color: var(--text);
+}
+.workspace:not(.player-layout) > .side.right {
+  width: 320px;
+}
+.workspace:not(.player-layout) > .side.right.split {
+  width: 620px;
+  flex-direction: row;
+}
+.workspace:not(.player-layout) > .side.right.split > .side-scroll {
+  flex: 1;
+  min-width: 0;
+}
+.workspace:not(.player-layout) > .side.right.split > .combat-col {
+  flex: 0 0 290px;
+  border-right: 1px solid var(--line);
+}
+@media (max-width: 1250px) {
+  .workspace:not(.player-layout) > .side.right.split {
+    width: 320px;
+    flex-direction: column;
+  }
+  .workspace:not(.player-layout) > .side.right.split > .combat-col {
+    flex: 1 1 50%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 }

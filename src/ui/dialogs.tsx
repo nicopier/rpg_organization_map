@@ -272,7 +272,7 @@ export function FileDialog({ onClose }: { onClose: () => void }) {
     if (!f) return
     try {
       const s = useMap.getState()
-      const { map, party, players } = importMapInto(await readJsonFile(f), s.doc.zoneId)
+      const { map, party, players } = importMapInto(await readJsonFile(f), s.doc.parentId)
       s.changeCampaign((c) => {
         c.maps.push(map)
         for (const p of players) if (!c.players.some((x) => x.name === p.name)) c.players.push(p)

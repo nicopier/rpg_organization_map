@@ -18,10 +18,13 @@ function visibleToViewer(layer: Layer, el: { visibility?: 'all' | 'dm' }) {
 }
 
 /** El jugador sólo arrastra sus propios personajes; el DM, lo que permita el modo. */
-function mayDrag(it: Placement, l: Layer): boolean {
+function mayDrag(it: Placement, l: Layer, force: boolean): boolean {
   const s = S()
-  if (s.role === 'player') return !!it.characterId && s.campaign.party.some((p) => p.id === it.characterId && p.owner === s.me)
-  return canMove(it, l, s.mode)
+  if (s.role === 'player') {
+    const ch = s.campaign.party.find((p) => p.id === it.characterId && p.owner === s.me)
+    return !!ch && !s.campaign.movementLocked && !ch.moveLocked
+  }
+  return canMove(it, l, s.mode, { partyIds: new Set(s.campaign.party.map((p) => p.id)), force })
 }
 
 /** Puerta o muro sobre el borde más cercano al cursor (capa Piso). El jugador no selecciona paredes. */
@@ -79,11 +82,15 @@ export const selectTool: ToolHandler = {
       for (const l of s.doc.layers) {
         for (const it of l.items ?? []) {
           if (!ids.includes(it.id)) continue
-          if (mayDrag(it, l)) origins.set(it.id, [it.x, it.y, it.w, it.h])
+          if (mayDrag(it, l, p.alt)) origins.set(it.id, [it.x, it.y, it.w, it.h])
           else blocked = true
         }
       }
-      if (blocked && s.role === 'dm') s.toast('Inamovible en modo juego. Pasá a modo edición o cambiá el permiso.')
+      if (blocked && s.role === 'dm') s.toast('Los personajes de los jugadores no se mueven en modo juego. Alt+arrastrar para moverlo igual.')
+      if (blocked && s.role === 'player') {
+        const own = s.campaign.party.some((c) => c.owner === s.me && ids.some((id) => s.doc.layers.some((ll) => ll.items?.some((i) => i.id === id && i.characterId === c.id))))
+        if (own) s.toast('El DM bloqueó el movimiento por ahora.')
+      }
       if (!origins.size) return
       s.beginGroup()
       drag = { sx: p.cx, sy: p.cy, origins, dx: 0, dy: 0 }

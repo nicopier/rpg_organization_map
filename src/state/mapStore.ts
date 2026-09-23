@@ -61,6 +61,8 @@ export type UiState = {
   roomOp: 'add' | 'sub'
   roomBrush: number
   fogOp: 'reveal' | 'hide'
+  /** Personajes que lleva "partyDrop"; null = toda la party. */
+  partyPick: string[] | null
   toastMsg: { text: string; id: number } | null
 }
 
@@ -127,6 +129,7 @@ function initialUi(doc: MapDoc): UiState {
     roomOp: 'add',
     roomBrush: 1,
     fogOp: 'reveal',
+    partyPick: null,
     toastMsg: null,
   }
 }

@@ -64,6 +64,15 @@ export class Scene {
     })
     if (this.destroyed) return this.app.destroy(true)
     host.appendChild(this.app.canvas)
+    // Pixi sólo escucha el resize de la ventana; los paneles que se pliegan o se abren
+    // (la columna de combate, la lista de mapas) también cambian el lugar del mapa.
+    const ro = new ResizeObserver(() => {
+      if (this.destroyed) return
+      this.app.resize()
+      this.requestOverlay()
+    })
+    ro.observe(host)
+    this.cleanup.push(() => ro.disconnect())
     this.world.addChild(this.bg, this.layerRoot, this.fog.g, this.overlay.container)
     this.app.stage.addChild(this.world)
 

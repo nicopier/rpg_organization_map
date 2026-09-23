@@ -232,9 +232,11 @@ export function createGameServer(dataDir: string) {
         })
       })
     } else if (msg.t === 'move') {
-      if (!ownChar(c, msg.characterId)) return
+      const ch = ownChar(c, msg.characterId)
+      // Rechazado: se le reenvía su vista para que el token vuelva a donde estaba.
+      if (!ch || campaign.movementLocked || ch.moveLocked) return send(c, { t: 'view', view: projectForPlayer(campaign, c.playerId) })
       mutate((d) => {
-        const m = d.maps.find((x) => x.id === d.activeMapId)
+        const m = d.maps.find((x) => layerOfKind(x, 'game').items?.some((i) => i.characterId === msg.characterId))
         if (!m) return
         const g = layerOfKind(m, 'game')
         const it = g.items?.find((i) => i.assetId === TOKEN_ASSET && i.characterId === msg.characterId)

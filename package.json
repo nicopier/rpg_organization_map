@@ -11,7 +11,8 @@
     "typecheck": "tsc -b",
     "start": "npm run build && tsx server/main.ts",
     "serve": "tsx server/main.ts",
-    "tunnel": "cloudflared tunnel --url http://localhost:5173"
+    "tunnel": "node scripts/tunnel.mjs 3000",
+    "tunnel:dev": "node scripts/tunnel.mjs 5173"
   },
   "dependencies": {
     "idb-keyval": "^6.3.0",

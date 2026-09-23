@@ -16,6 +16,12 @@ export function MapCanvas() {
   const docId = useMap((s) => s.doc.id)
   const tableId = useMap((s) => s.campaign.activeMapId)
   const tableName = useMap((s) => s.campaign.maps.find((m) => m.id === s.campaign.activeMapId)?.name)
+  const dropWho = useMap((s) => {
+    const pick = s.partyPick
+    if (!pick) return 'entra la party'
+    const names = s.campaign.party.filter((c) => pick.includes(c.id)).map((c) => c.name)
+    return names.length === 1 ? `entra ${names[0]}` : `entran ${names.join(', ')}`
+  })
 
   useEffect(() => {
     const scene = new Scene()
@@ -49,15 +55,15 @@ export function MapCanvas() {
             Vista de jugador: así ven el mapa los jugadores. <kbd>P</kbd> para volver.
           </div>
         )}
-        {tool === 'partyDrop' && <div className="banner play">Clic donde entra la party. Esc para cancelar.</div>}
+        {tool === 'partyDrop' && <div className="banner play">Clic donde {dropWho}. Esc para cancelar.</div>}
         {elsewhere && (
           <div className="banner elsewhere">
-            Los jugadores están en <b>{tableName}</b>.
+            La mesa está en <b>{tableName}</b>.
             <button onClick={() => bringPartyTo(docId)}>Llevar la party acá</button>
           </div>
         )}
         {role === 'dm' && viewer === 'dm' && mode === 'play' && !elsewhere && tool !== 'partyDrop' && (
-          <div className="banner play">Modo juego: lo inamovible queda fijo.</div>
+          <div className="banner play">Modo juego: los personajes de los jugadores quedan fijos (Alt+arrastrar para moverlos).</div>
         )}
       </div>
       {menu && <ContextMenu req={menu} onClose={() => setMenu(null)} />}

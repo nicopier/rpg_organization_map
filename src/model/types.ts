@@ -116,6 +116,8 @@ export type Character = {
   color: string
   /** Imagen del token (URL servida por el servidor de la partida). */
   image?: string
+  /** El DM le congeló el movimiento a este personaje. */
+  moveLocked?: boolean
 }
 
 export type CombatEntry = { characterId: string; initiative: number }
@@ -136,7 +138,8 @@ export type Fog = {
 export type MapDoc = {
   id: string
   name: string
-  zoneId: string | null
+  /** Carpeta o mapa que lo contiene; null = raíz. */
+  parentId: string | null
   grid: Grid
   layers: Layer[]
   /** NPCs de este mapa. Los PJ viven en la campaña (party). */
@@ -145,7 +148,8 @@ export type MapDoc = {
   fog: Fog
 }
 
-export type Zone = { id: string; name: string }
+/** Carpeta del árbol de mapas. Puede estar dentro de otra carpeta o de un mapa. */
+export type Zone = { id: string; name: string; parentId?: string | null }
 
 export type Player = {
   id: string
@@ -167,6 +171,8 @@ export type Campaign = {
   players: Player[]
   /** El mapa donde está la mesa: es el que ven los jugadores. */
   activeMapId: string | null
+  /** El DM congeló el movimiento de todos los jugadores. */
+  movementLocked?: boolean
 }
 
 export const TOKEN_ASSET = '@token'

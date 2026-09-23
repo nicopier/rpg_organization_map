@@ -12,8 +12,15 @@ export const partyDropTool: ToolHandler = {
   down(p) {
     if (!hoverCell(p)) return
     if (!S().campaign.party.length) return S().toast('La party está vacía: creá personajes en el panel Party.')
-    moveParty(p.cx, p.cy)
-    S().setUi({ tool: 'select' })
-    S().toast(`La party llegó a "${S().doc.name}". Es el mapa que ven los jugadores.`)
+    const pick = S().partyPick
+    moveParty(p.cx, p.cy, pick ?? undefined)
+    S().setUi({ tool: 'select', partyPick: null })
+    const who = pick
+      ? S()
+          .campaign.party.filter((c) => pick.includes(c.id))
+          .map((c) => c.name)
+          .join(', ')
+      : 'Todos'
+    S().toast(`${who} ${!pick || pick.length > 1 ? 'llegaron' : 'llegó'} a "${S().doc.name}".`)
   },
 }

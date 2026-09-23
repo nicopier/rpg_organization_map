@@ -11,16 +11,18 @@ import {
   removePartyMember,
   removePlayer,
   renamePlayer,
+  setCharacterLocked,
   revealAll,
   setFogEnabled,
 } from '../state/actions'
+import { pathOf } from '../model/tree'
 import { useMap, type TokenDraft } from '../state/mapStore'
 import { AssetPalette } from './AssetPalette'
 import { ColorSwatches, CommitText, Segmented } from './fields'
 import { Icon } from './Icon'
 import { ImagePicker } from './ImagePicker'
 import { bringPartyTo } from './MapsPanel'
-import { armToken, NumField } from './NpcPanel'
+import { NumField } from './NpcPanel'
 
 export function Avatar({ ch, size = 30 }: { ch: Pick<Character, 'name' | 'color' | 'image' | 'hp'>; size?: number }) {
   const down = ch.hp.cur <= 0
@@ -47,8 +49,13 @@ export function PartyPanel() {
   const mapId = useMap((s) => s.mapId)
   const online = useNet((s) => s.online)
   const [adding, setAdding] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
   const where = partyLocation(campaign)
-  const mapName = (id: string | null) => campaign.maps.find((m) => m.id === id)?.name
+  const mapPath = (id: string) => pathOf(campaign, id).join(' › ')
+  // Lo elegido que ya no existe (sacado de la campaña) no cuenta.
+  const pick = picked.filter((id) => campaign.party.some((c) => c.id === id))
+  const allPicked = campaign.party.length > 0 && pick.length === campaign.party.length
+  const togglePick = (id: string) => setPicked(pick.includes(id) ? pick.filter((x) => x !== id) : [...pick, id])
   const playerName = (id: string) => (id === 'dm' ? 'DM' : (campaign.players.find((p) => p.id === id)?.name ?? '—'))
 
   const selectToken = (charId: string) => {
@@ -61,12 +68,23 @@ export function PartyPanel() {
   return (
     <div className="token-panel">
       <section>
-        <button className="primary block" onClick={() => bringPartyTo(mapId)} disabled={!campaign.party.length}>
-          <Icon name="token" size={16} /> Llevar la party a este mapa
+        <button
+          className="primary block"
+          onClick={() => {
+            bringPartyTo(mapId, pick.length && !allPicked ? pick : undefined)
+            setPicked([])
+          }}
+          disabled={!campaign.party.length}
+        >
+          <Icon name="token" size={16} />{' '}
+          {pick.length && !allPicked ? `Traer ${pick.length === 1 ? 'al elegido' : `a los ${pick.length} elegidos`}` : 'Traer toda la party'}
         </button>
+        {campaign.party.length > 1 && (
+          <p className="hint">Marcá personajes abajo para traer sólo a esos; sin marcar, viene toda la party.</p>
+        )}
         {campaign.activeMapId !== mapId && (
           <p className="hint">
-            Los jugadores están en <b>{mapName(campaign.activeMapId) ?? '—'}</b>. Al traer la party, este pasa a ser el mapa de la mesa.
+            La mesa está en <b>{campaign.activeMapId ? mapPath(campaign.activeMapId) : '—'}</b>. Cada jugador ve el mapa donde está su personaje.
           </p>
         )}
       </section>
@@ -74,6 +92,11 @@ export function PartyPanel() {
       <section>
         <div className="section-head">
           <h4>Personajes</h4>
+          {campaign.party.length > 1 && (
+            <button className="link" onClick={() => setPicked(allPicked ? [] : campaign.party.map((c) => c.id))}>
+              {allPicked ? 'Ninguno' : 'Todos'}
+            </button>
+          )}
           <button className="small-btn" onClick={() => setAdding(!adding)}>
             <Icon name={adding ? 'x' : 'plus'} size={14} /> {adding ? 'Cerrar' : 'Nuevo'}
           </button>
@@ -85,7 +108,14 @@ export function PartyPanel() {
             const loc = where.get(ch.id) ?? null
             const here = loc === mapId
             return (
-              <li key={ch.id} className={here ? 'here' : ''} onClick={() => here && selectToken(ch.id)}>
+              <li key={ch.id} className={`${here ? 'here' : ''}${pick.includes(ch.id) ? ' picked' : ''}`} onClick={() => here && selectToken(ch.id)}>
+                <input
+                  type="checkbox"
+                  checked={pick.includes(ch.id)}
+                  onChange={() => togglePick(ch.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Elegir a ${ch.name}`}
+                />
                 <Avatar ch={ch} />
                 <div className="who">
                   <span className="name">
@@ -96,15 +126,28 @@ export function PartyPanel() {
                     <HpBar cur={ch.hp.cur} max={ch.hp.max} />
                     {ch.hp.cur}/{ch.hp.max} · CA {ch.ac}
                   </span>
-                  <span className="where">{loc ? (here ? 'En este mapa' : `En ${mapName(loc)}`) : 'Fuera de los mapas'}</span>
+                  <span className="where" title={loc ? mapPath(loc) : undefined}>
+                    {loc ? (here ? `Acá · ${mapPath(loc)}` : mapPath(loc)) : 'Fuera de los mapas'}
+                  </span>
                 </div>
+                <button
+                  className={`icon-btn tiny${ch.moveLocked ? ' locked' : ''}`}
+                  title={ch.moveLocked ? 'Congelado: no puede moverse. Clic para liberarlo.' : 'Congelar su movimiento'}
+                  aria-pressed={!!ch.moveLocked}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setCharacterLocked(ch.id, !ch.moveLocked)
+                  }}
+                >
+                  <Icon name={ch.moveLocked ? 'lock' : 'unlock'} size={13} />
+                </button>
                 {!here && (
                   <button
                     className="small-btn"
-                    title="Colocarlo en este mapa"
+                    title="Traer sólo a este personaje: después hacé clic en el mapa"
                     onClick={(e) => {
                       e.stopPropagation()
-                      armToken({ name: ch.name, kind: 'pc', owner: ch.owner, hpMax: ch.hp.max, ac: ch.ac, speed: ch.speed, initiativeMod: ch.initiativeMod, color: ch.color, size: 1, characterId: ch.id })
+                      bringPartyTo(mapId, [ch.id])
                     }}
                   >
                     Traer

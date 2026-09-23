@@ -2,6 +2,7 @@
 import type { Draft } from 'immer'
 import { getAsset } from '../assets/catalog'
 import { newId, newKey } from '../model/ids'
+import { isInside, type NodeKind } from '../model/tree'
 import { cellKey, createEmptyMap, layerOfKind, makePlayer } from '../model/mapDoc'
 import { findLayer } from '../model/queries'
 import {
@@ -520,6 +521,24 @@ export function addPlayer(name: string): string {
   return id
 }
 
+/** Congela (o libera) el movimiento de todos los jugadores. */
+export function setMovementLocked(locked: boolean) {
+  changeCampaign((c) => {
+    if (locked) c.movementLocked = true
+    else delete c.movementLocked
+  })
+}
+
+/** Congela (o libera) el movimiento de un personaje. */
+export function setCharacterLocked(id: string, locked: boolean) {
+  changeCampaign((c) => {
+    const ch = c.party.find((p) => p.id === id)
+    if (!ch) return
+    if (locked) ch.moveLocked = true
+    else delete ch.moveLocked
+  })
+}
+
 /** Genera n invitaciones: cada una es una silla con su propio link. */
 export function addInvites(n: number) {
   changeCampaign((c) => {
@@ -558,10 +577,10 @@ export function renameCampaign(name: string) {
   })
 }
 
-export function addZone(name = 'Zona nueva'): string {
+export function addZone(parentId: string | null = null, name = 'Carpeta nueva'): string {
   const id = newId('Z')
   changeCampaign((c) => {
-    c.zones.push({ id, name })
+    c.zones.push({ id, name, parentId })
   })
   return id
 }
@@ -573,16 +592,24 @@ export function renameZone(id: string, name: string) {
   })
 }
 
-/** Borra una zona; sus mapas quedan "sin zona", no se pierden. */
+/** Lo que colgaba de un nodo borrado sube un nivel: borrar una carpeta o un mapa nunca se lleva a sus hijos. */
+function adoptChildren(c: Draft<Campaign>, id: string, newParent: string | null) {
+  for (const z of c.zones) if (z.parentId === id) z.parentId = newParent
+  for (const m of c.maps) if (m.parentId === id) m.parentId = newParent
+}
+
+/** Borra una carpeta; su contenido pasa a la carpeta de arriba. */
 export function removeZone(id: string) {
   changeCampaign((c) => {
-    c.zones = c.zones.filter((z) => z.id !== id)
-    for (const m of c.maps) if (m.zoneId === id) m.zoneId = null
+    const z = c.zones.find((x) => x.id === id)
+    if (!z) return
+    adoptChildren(c, id, z.parentId ?? null)
+    c.zones = c.zones.filter((x) => x.id !== id)
   })
 }
 
-export function addMap(zoneId: string | null, name = 'Mapa nuevo', cols = 30, rows = 20): string {
-  const map = createEmptyMap(name, cols, rows, zoneId)
+export function addMap(parentId: string | null, name = 'Mapa nuevo', cols = 30, rows = 20): string {
+  const map = createEmptyMap(name, cols, rows, parentId)
   changeCampaign((c) => {
     c.maps.push(map)
   })
@@ -621,21 +648,30 @@ export function duplicateMap(id: string): string | null {
 export function deleteMap(id: string) {
   if (S().campaign.maps.length <= 1) return S().toast('La campaña necesita al menos un mapa.')
   changeCampaign((c) => {
-    c.maps = c.maps.filter((m) => m.id !== id)
+    const m = c.maps.find((x) => x.id === id)
+    if (!m) return
+    adoptChildren(c, id, m.parentId)
+    c.maps = c.maps.filter((x) => x.id !== id)
     if (c.activeMapId === id) c.activeMapId = c.maps[0].id
   })
 }
 
-/** Cambia un mapa de zona y lo ubica antes de `beforeId` (o al final). */
-export function moveMap(id: string, zoneId: string | null, beforeId?: string) {
+/**
+ * Mueve una carpeta o un mapa adentro de `parentId` (null = raíz), antes de `beforeId` si es
+ * del mismo tipo, o al final. No deja meter un nodo dentro de sí mismo.
+ */
+export function moveNode(kind: NodeKind, id: string, parentId: string | null, beforeId?: string) {
+  const c0 = S().campaign
+  if (parentId === id || (parentId && isInside(c0, parentId, id))) return
   changeCampaign((c) => {
-    const i = c.maps.findIndex((m) => m.id === id)
+    const list = (kind === 'zone' ? c.zones : c.maps) as { id: string; parentId?: string | null }[]
+    const i = list.findIndex((x) => x.id === id)
     if (i < 0) return
-    const [m] = c.maps.splice(i, 1)
-    m.zoneId = zoneId
-    const j = beforeId ? c.maps.findIndex((x) => x.id === beforeId) : -1
-    if (j >= 0) c.maps.splice(j, 0, m)
-    else c.maps.push(m)
+    const [node] = list.splice(i, 1)
+    node.parentId = parentId
+    const j = beforeId ? list.findIndex((x) => x.id === beforeId) : -1
+    if (j >= 0) list.splice(j, 0, node)
+    else list.push(node)
   })
 }
 

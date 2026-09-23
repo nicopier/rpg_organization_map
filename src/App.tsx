@@ -56,6 +56,25 @@ export function Section({ id, title, icon, extra, children }: { id: string; titl
 
 function RightPanel() {
   const combat = useMap((s) => s.doc.combat)
+  if (combat.active) {
+    return (
+      <aside className="side right split">
+        <div className="side-scroll combat-col">
+          <Section id="combat" title="Iniciativa" icon="sword" extra={<span className="badge live">Ronda {combat.round}</span>}>
+            <InitiativeTracker />
+          </Section>
+        </div>
+        <div className="side-scroll">
+          <Section id="inspector" title="Inspector" icon="select">
+            <InspectorPanel />
+          </Section>
+          <Section id="layers" title="Capas" icon="layers">
+            <LayerPanel />
+          </Section>
+        </div>
+      </aside>
+    )
+  }
   return (
     <aside className="side right">
       <div className="side-scroll">
@@ -115,7 +134,7 @@ function useDropImport() {
           const { campaign } = migrateCampaign(raw)
           if (confirm(`¿Reemplazar la campaña actual por "${campaign.name}"?`)) replaceCampaign(campaign)
         } else {
-          const { map, party, players } = importMapInto(raw, s.doc.zoneId)
+          const { map, party, players } = importMapInto(raw, s.doc.parentId)
           s.changeCampaign((c) => {
             c.maps.push(map)
             for (const p of players) if (!c.players.some((x) => x.name === p.name)) c.players.push(p)

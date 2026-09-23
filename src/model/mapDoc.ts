@@ -65,11 +65,11 @@ export function makeLayer(kind: LayerKind): Layer {
   return layer
 }
 
-export function createEmptyMap(name = 'Mapa sin título', cols = 30, rows = 20, zoneId: string | null = null): MapDoc {
+export function createEmptyMap(name = 'Mapa sin título', cols = 30, rows = 20, parentId: string | null = null): MapDoc {
   return {
     id: newId('M'),
     name,
-    zoneId,
+    parentId,
     grid: { cols, rows, cellPx: 70, show: false, color: '#00000033', bg: '#d9d0bd' },
     layers: LAYER_ORDER.map(makeLayer),
     characters: [],
@@ -125,8 +125,8 @@ type V1Map = {
  * los nombres de jugador pasan a ser jugadores con id. Los bloques de pared no tienen equivalente
  * (las salas los reemplazan) y se descartan.
  */
-function migrateV1Map(v1: V1Map, zoneId: string | null) {
-  const map = createEmptyMap(v1.name, v1.grid.cols, v1.grid.rows, zoneId)
+function migrateV1Map(v1: V1Map, parentId: string | null) {
+  const map = createEmptyMap(v1.name, v1.grid.cols, v1.grid.rows, parentId)
   map.id = v1.id
   map.grid = { ...map.grid, ...v1.grid }
   const [floor, objects, npcs, game] = LAYER_ORDER.map((k) => layerOfKind(map, k))
@@ -171,8 +171,11 @@ function migrateV1Map(v1: V1Map, zoneId: string | null) {
   return { map, party, players, droppedBlocks }
 }
 
-function fillMap(m: Partial<MapDoc>): MapDoc {
-  const base = createEmptyMap(m.name, m.grid?.cols, m.grid?.rows, m.zoneId ?? null)
+function fillMap(raw: Partial<MapDoc> & { zoneId?: string | null }): MapDoc {
+  // Antes cada mapa tenía una zona; ahora tiene un padre (carpeta o mapa).
+  const { zoneId, ...m } = raw
+  if (m.parentId === undefined) m.parentId = zoneId ?? null
+  const base = createEmptyMap(m.name, m.grid?.cols, m.grid?.rows, m.parentId)
   const layers = LAYER_ORDER.map((k) => {
     const found = m.layers?.find((l) => l.kind === k)
     return found ? { ...makeLayer(k), ...found } : makeLayer(k)
@@ -226,10 +229,10 @@ export function migrateCampaign(raw: unknown): { campaign: Campaign; notes: stri
 }
 
 /** Importar un mapa (v1 o de otra campaña v2) dentro de la campaña actual. */
-export function importMapInto(raw: unknown, zoneId: string | null): { map: MapDoc; party: Character[]; players: Player[] } {
+export function importMapInto(raw: unknown, parentId: string | null): { map: MapDoc; party: Character[]; players: Player[] } {
   const r = raw as { version?: number }
   if (r?.version === 1) {
-    const { map, party, players } = migrateV1Map(raw as V1Map, zoneId)
+    const { map, party, players } = migrateV1Map(raw as V1Map, parentId)
     map.id = newId('M')
     return { map, party, players }
   }

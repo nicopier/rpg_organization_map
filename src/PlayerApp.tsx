@@ -170,6 +170,7 @@ export function PlayerApp() {
   const noTable = useMap((s) => s.campaign.activeMapId === null)
   const myName = useMap((s) => s.campaign.players.find((p) => p.id === s.me)?.name)
   const named = !!myName
+  const frozen = useMap((s) => !!s.campaign.movementLocked || s.campaign.party.some((c) => c.owner === s.me && c.moveLocked))
   useShortcuts()
 
   useEffect(() => connectPlayer(), [])
@@ -213,6 +214,13 @@ export function PlayerApp() {
         <div className="canvas-col">
           <MapCanvas />
           {noTable && <div className="waiting">Esperando que el DM lleve la party a un mapa…</div>}
+          {frozen && !noTable && (
+            <div className="banners">
+              <div className="banner frozen">
+                <Icon name="lock" size={14} /> El DM pausó el movimiento
+              </div>
+            </div>
+          )}
         </div>
         <PlayerSide />
       </main>

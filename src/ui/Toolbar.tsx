@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNet } from '../net/client'
-import { renameMap } from '../state/actions'
+import { renameMap, setMovementLocked } from '../state/actions'
 import { useMap, type Tool } from '../state/mapStore'
 import { fitMap, setTool, togglePlayerView } from './commands'
 import { FileDialog, GridSettings, InviteDialog } from './dialogs'
@@ -42,6 +42,7 @@ export function Toolbar() {
   const online = useNet((s) => s.online.length)
   const [dialog, setDialog] = useState<Dialog>(null)
   const tools = mode === 'edit' ? EDIT_TOOLS : PLAY_TOOLS
+  const frozen = useMap((s) => !!s.campaign.movementLocked)
 
   return (
     <header className="toolbar">
@@ -51,7 +52,7 @@ export function Toolbar() {
         <button className={mode === 'edit' ? 'on' : ''} onClick={() => useMap.getState().setUi({ mode: 'edit', tool: 'select' })} title="Diseñar el mapa: salas, piso, objetos y NPC">
           <Icon name="hammer" size={15} /> Edición
         </button>
-        <button className={mode === 'play' ? 'on' : ''} onClick={() => useMap.getState().setUi({ mode: 'play', tool: 'select' })} title="Jugar: party, niebla y marcas; lo inamovible queda fijo">
+        <button className={mode === 'play' ? 'on' : ''} onClick={() => useMap.getState().setUi({ mode: 'play', tool: 'select' })} title="Jugar: party, niebla y marcas; los personajes de los jugadores quedan fijos">
           <Icon name="sword" size={15} /> Juego
         </button>
       </div>
@@ -79,6 +80,17 @@ export function Toolbar() {
           <Icon name="redo" />
         </button>
       </div>
+
+      {mode === 'play' && (
+        <button
+          className={`pill freeze${frozen ? ' on' : ''}`}
+          onClick={() => setMovementLocked(!frozen)}
+          aria-pressed={frozen}
+          title={frozen ? 'Los jugadores no pueden mover sus personajes. Clic para liberarlos.' : 'Congelar el movimiento de todos los jugadores'}
+        >
+          <Icon name={frozen ? 'lock' : 'unlock'} size={15} /> {frozen ? 'Jugadores congelados' : 'Congelar jugadores'}
+        </button>
+      )}
 
       <div className="spacer" />
 

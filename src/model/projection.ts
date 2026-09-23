@@ -1,5 +1,6 @@
 import { cellKey, createEmptyMap } from './mapDoc'
 import { TOKEN_ASSET, type Campaign, type Character, type Layer, type MapDoc, type Placement } from './types'
+import { mapOfCharacter } from './tree'
 import { isVisibleTo } from './visibility'
 
 /** Id del mapa vacío que se manda cuando todavía no hay mesa. */
@@ -60,13 +61,17 @@ function filterMap(m: MapDoc, partyIds: Set<string>): MapDoc {
 }
 
 /**
- * Lo que recibe un jugador: sólo el mapa de la mesa, sin nada oculto ni bajo la niebla,
+ * Lo que recibe un jugador: sólo el mapa donde está (o el de la mesa), sin nada oculto ni bajo la niebla,
  * y con los stats (HP, CA, estados, notas) sólo de su propio personaje.
  * La calcula el servidor: lo que no está acá nunca sale de la PC del DM.
  */
 export function projectForPlayer(c: Campaign, playerId: string | null): Campaign {
   const partyIds = new Set(c.party.map((p) => p.id))
-  const active = c.maps.find((m) => m.id === c.activeMapId)
+  // La party se puede separar: cada jugador ve el mapa donde está su personaje;
+  // si todavía no está en ninguno, el de la mesa.
+  const mine = c.party.filter((p) => p.owner === playerId)
+  const own = mine.map((p) => mapOfCharacter(c, p.id)).find(Boolean)
+  const active = own ?? c.maps.find((m) => m.id === c.activeMapId)
   const map = active ? filterMap(active, partyIds) : { ...createEmptyMap(''), id: NO_MAP }
   return {
     ...c,
