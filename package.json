@@ -1,0 +1,35 @@
+{
+  "name": "mappaneitor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "catalog": "node scripts/gen-catalog.mjs",
+    "dev": "npm run catalog && vite",
+    "build": "npm run catalog && tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "start": "npm run build && tsx server/main.ts",
+    "serve": "tsx server/main.ts",
+    "tunnel": "cloudflared tunnel --url http://localhost:5173"
+  },
+  "dependencies": {
+    "idb-keyval": "^6.3.0",
+    "immer": "^11.1.18",
+    "pixi.js": "^8.21.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "ws": "^8.21.3",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}
