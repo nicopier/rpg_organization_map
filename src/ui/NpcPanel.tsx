@@ -3,6 +3,7 @@ import { useMap, type TokenDraft } from '../state/mapStore'
 import { ColorSwatches } from './fields'
 import { Icon } from './Icon'
 import { ImagePicker } from './ImagePicker'
+import { NpcNamesToggle } from './NpcNames'
 
 type Template = Omit<TokenDraft, 'kind' | 'owner'>
 
@@ -71,6 +72,7 @@ export function NpcPanel() {
 
   return (
     <div className="token-panel">
+      <NpcNamesToggle />
       <section>
         <h4>NPC rápidos</h4>
         <div className="templates">

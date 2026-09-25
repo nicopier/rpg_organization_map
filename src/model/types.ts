@@ -146,6 +146,11 @@ export type MapDoc = {
   characters: Character[]
   combat: Combat
   fog: Fog
+  /**
+   * Los jugadores ven el nombre real de los NPC de este mapa. Apagado (por defecto) los ven
+   * numerados ("NPC 1", "NPC 2"), que alcanza para seguir la iniciativa sin spoilear quién es quién.
+   */
+  revealNpcNames?: boolean
 }
 
 /** Carpeta del árbol de mapas. Puede estar dentro de otra carpeta o de un mapa. */

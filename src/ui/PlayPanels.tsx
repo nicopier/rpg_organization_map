@@ -11,8 +11,8 @@ import {
   removePartyMember,
   removePlayer,
   renamePlayer,
-  setCharacterLocked,
   revealAll,
+  setCharacterLocked,
   setFogEnabled,
 } from '../state/actions'
 import { pathOf } from '../model/tree'
@@ -23,6 +23,7 @@ import { Icon } from './Icon'
 import { ImagePicker } from './ImagePicker'
 import { bringPartyTo } from './MapsPanel'
 import { NumField } from './NpcPanel'
+import { NpcNamesToggle } from './NpcNames'
 
 export function Avatar({ ch, size = 30 }: { ch: Pick<Character, 'name' | 'color' | 'image' | 'hp'>; size?: number }) {
   const down = ch.hp.cur <= 0
@@ -295,6 +296,7 @@ export function FogPanel() {
           </div>
         </section>
       )}
+      <NpcNamesToggle />
     </div>
   )
 }

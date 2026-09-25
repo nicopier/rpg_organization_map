@@ -1,5 +1,4 @@
 import { BlurFilter, Container, Graphics, Sprite, Text } from 'pixi.js'
-import { getAsset } from '../../assets/catalog'
 import { TOKEN_ASSET, type Character, type Layer, type Placement } from '../../model/types'
 import { isHiddenFromPlayers } from '../../model/visibility'
 import { hiddenBadge } from '../badges'
@@ -77,14 +76,16 @@ export class ItemRenderer implements LayerRenderer {
     if (item.assetId === TOKEN_ASSET) {
       root.addChild(drawToken(item, ch, c, active))
     } else {
-      const a = getAsset(item.assetId)
       const { tex, missing } = assetTexture(item.assetId)
       const s = new Sprite(tex)
       s.anchor.set(0.5)
       s.position.set((item.w * c) / 2, (item.h * c) / 2)
-      // Tamaño sin rotar del asset; la rotación hace que ocupe el footprint (w/h ya intercambiados).
-      s.width = (a?.w ?? item.w) * c
-      s.height = (a?.h ?? item.h) * c
+      // Tamaño sin rotar del OBJETO (no del catálogo): así se ve el redimensionado del Inspector.
+      // item.w/h están en coordenadas del mapa (ya intercambiados si está de costado), y el sprite
+      // se dibuja sin rotar, así que para 90°/270° hay que volver a intercambiarlos.
+      const swap = item.rot === 90 || item.rot === 270
+      s.width = (swap ? item.h : item.w) * c
+      s.height = (swap ? item.w : item.h) * c
       s.rotation = (item.rot * Math.PI) / 180
       if (item.flipX) s.scale.x *= -1
       root.addChild(s)

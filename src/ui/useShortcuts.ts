@@ -4,6 +4,7 @@ import { useMap, type Tool } from '../state/mapStore'
 import {
   duplicateSelection,
   flipSelection,
+  growSelection,
   nudgeSelection,
   removeSelection,
   rotateSelection,
@@ -61,6 +62,15 @@ export function useShortcuts() {
         return nudgeSelection(...ARROWS[e.key])
       }
       switch (e.key) {
+        // '+' pide Shift en casi todo teclado, y el del pad llega como 'Add'/'+'.
+        case '+':
+        case '=':
+        case 'Add':
+          return growSelection(1)
+        case '-':
+        case '_':
+        case 'Subtract':
+          return growSelection(-1)
         case 'r':
         case 'R':
           return rotateSelection()

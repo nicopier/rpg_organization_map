@@ -483,10 +483,58 @@ h4 {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* Fila de packs (subcarpetas de assets/): va arriba de las categorías y se lee como solapas. */
+.chips.packs {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.chips.packs button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg, #14304d);
+}
 .brush-box {
   background: var(--panel-2);
   border-radius: var(--radius);
   padding: 10px;
+}
+
+/* Tamaño del objeto seleccionado (Inspector). */
+.size-box {
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+.size-box .chips.sizes {
+  margin-bottom: 8px;
+}
+.size-box .chips.sizes button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.size-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.size-fields label {
+  flex: 1;
+  min-width: 0;
+}
+.size-fields input {
+  width: 100%;
+}
+.size-fields .times {
+  padding-bottom: 6px;
+  color: var(--muted);
+}
+.size-fields button {
+  width: 30px;
+  padding: 0;
+  height: 30px;
+  font-size: 16px;
+  line-height: 1;
 }
 
 .asset-grid {

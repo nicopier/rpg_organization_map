@@ -7,7 +7,10 @@ import { hpColor, initials } from '../render/layers/tokenGraphic'
 import {
   addToCombat,
   applyHp,
+  baseSize,
+  MAX_ITEM_CELLS,
   moveItemsToLayer,
+  resizeItems,
   setItemsVisibility,
   updateCharacter,
   updateItem,
@@ -69,7 +72,7 @@ export function InspectorPanel() {
       {viewer === 'dm' && (
         <ul className="shortcuts">
           <li>
-            <kbd>R</kbd> rotar · <kbd>F</kbd> espejar · <kbd>H</kbd> ocultar/revelar
+            <kbd>R</kbd> rotar · <kbd>F</kbd> espejar · <kbd>H</kbd> ocultar/revelar · <kbd>+</kbd>/<kbd>−</kbd> tamaño
           </li>
           <li>
             <kbd>Ctrl+D</kbd> duplicar · <kbd>Supr</kbd> borrar · flechas mueven
@@ -172,6 +175,100 @@ function LayerControl({ item, layer }: { item: Placement; layer: Layer }) {
   )
 }
 
+/* ---------- Tamaño ---------- */
+
+/** Presets en casillas. El resto se pone a mano en los campos. */
+const SIZE_PRESETS: [number, number][] = [
+  [1, 1],
+  [2, 1],
+  [1, 2],
+  [2, 2],
+  [3, 3],
+]
+
+/**
+ * Cambia el footprint de los objetos seleccionados. Los tokens de personaje no se redimensionan
+ * (los filtra `resizeItems`), así que el control no se muestra para ellos.
+ */
+function SizeControl({ items }: { items: Placement[] }) {
+  const grid = useMap((s) => s.doc.grid)
+  const ids = items.map((i) => i.id)
+  const one = items.length === 1 ? items[0] : null
+  // Con varios seleccionados sólo se muestra un valor si coinciden todos.
+  const sameW = items.every((i) => i.w === items[0].w) ? items[0].w : null
+  const sameH = items.every((i) => i.h === items[0].h) ? items[0].h : null
+  // Cuánto se puede agrandar sin que el que está más al borde se salga del mapa.
+  const maxW = Math.min(MAX_ITEM_CELLS, ...items.map((i) => grid.cols - i.x))
+  const maxH = Math.min(MAX_ITEM_CELLS, ...items.map((i) => grid.rows - i.y))
+  const isPreset = (w: number, h: number) => sameW === w && sameH === h
+
+  return (
+    <section className="size-box">
+      <div className="section-head">
+        <h4>Tamaño en casillas</h4>
+        {one && (sameW !== baseSize(one).w || sameH !== baseSize(one).h) && (
+          <button className="link" onClick={() => resizeItems(ids, baseSize(one))}>
+            Volver al original
+          </button>
+        )}
+      </div>
+
+      <div className="chips sizes">
+        {SIZE_PRESETS.map(([w, h]) => (
+          <button
+            key={`${w}x${h}`}
+            className={isPreset(w, h) ? 'on' : ''}
+            disabled={w > maxW || h > maxH}
+            title={w > maxW || h > maxH ? 'No entra: se saldría del mapa' : `${w}×${h} casillas`}
+            onClick={() => resizeItems(ids, { w, h })}
+          >
+            {w}×{h}
+          </button>
+        ))}
+      </div>
+
+      <div className="size-fields">
+        <label>
+          Ancho
+          <CommitNumber
+            value={sameW ?? 0}
+            min={1}
+            max={maxW}
+            onCommit={(v) => resizeItems(ids, (it) => ({ w: v, h: it.h }))}
+            aria-label="Ancho en casillas"
+          />
+        </label>
+        <span className="times">×</span>
+        <label>
+          Alto
+          <CommitNumber
+            value={sameH ?? 0}
+            min={1}
+            max={maxH}
+            onCommit={(v) => resizeItems(ids, (it) => ({ w: it.w, h: v }))}
+            aria-label="Alto en casillas"
+          />
+        </label>
+        <button
+          title="Achicar (tecla −)"
+          disabled={sameW === 1 && sameH === 1}
+          onClick={() => resizeItems(ids, (it) => ({ w: it.w - 1, h: it.h - 1 }))}
+        >
+          −
+        </button>
+        <button
+          title="Agrandar (tecla +)"
+          disabled={(sameW ?? 1) >= maxW && (sameH ?? 1) >= maxH}
+          onClick={() => resizeItems(ids, (it) => ({ w: it.w + 1, h: it.h + 1 }))}
+        >
+          +
+        </button>
+      </div>
+      {items.length > 1 && (sameW === null || sameH === null) && <p className="hint">Los seleccionados tienen tamaños distintos.</p>}
+    </section>
+  )
+}
+
 /* ---------- Un objeto o token ---------- */
 
 function ItemInspector({ layer, item }: { layer: Layer; item: Placement }) {
@@ -222,6 +319,8 @@ function ItemInspector({ layer, item }: { layer: Layer; item: Placement }) {
           onChange={(v) => setItemsVisibility([item.id], v)}
         />
       </section>
+
+      {!isToken && <SizeControl items={[item]} />}
 
       <section className="form">
         <LayerControl item={item} layer={layer} />
@@ -456,6 +555,8 @@ function NotesField({ value, onCommit }: { value: string; onCommit: (v: string) 
 function MultiInspector({ found }: { found: { layer: Layer; item: Placement }[] }) {
   const allHidden = found.every((f) => effectiveVisibility(f.item, f.layer) === 'dm')
   const ids = found.map((f) => f.item.id)
+  // Los tokens de personaje no se redimensionan; si la selección los mezcla, se ignoran acá.
+  const resizable = found.map((f) => f.item).filter((i) => i.assetId !== TOKEN_ASSET)
   const perms = new Set(found.map((f) => effectivePermission(f.item, f.layer)))
   return (
     <div className="inspector">
@@ -479,6 +580,7 @@ function MultiInspector({ found }: { found: { layer: Layer; item: Placement }[] 
           )}
         </div>
       </section>
+      {resizable.length > 0 && <SizeControl items={resizable} />}
       <div className="insp-actions">
         <button onClick={rotateSelection}>
           <Icon name="rotate" size={16} /> Rotar

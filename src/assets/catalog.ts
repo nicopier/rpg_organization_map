@@ -14,7 +14,20 @@ export function getAsset(id: string): AssetDef | undefined {
 }
 
 export function assetUrl(a: AssetDef): string {
-  return `/assets/${encodeURIComponent(a.file)}`
+  // Segmento por segmento: la barra de la subcarpeta tiene que seguir siendo barra en la URL.
+  return `/assets/${a.file.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/** Packs (subcarpetas de assets/) presentes, en el orden en que aparecen. */
+export const PACKS: string[] = [...new Set(ASSETS.map((a) => a.pack).filter((p): p is string => !!p))]
+
+/** "props-medievales" → "Props medievales". */
+export function packLabel(pack: string): string {
+  return pack
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^./, (c) => c.toUpperCase())
 }
 
 /** Tamaño del pack original: 70 px = 1 casilla. */

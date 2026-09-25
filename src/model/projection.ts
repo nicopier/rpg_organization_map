@@ -47,9 +47,14 @@ function filterMap(m: MapDoc, partyIds: Set<string>): MapDoc {
   })
 
   const visibleNpc = new Set(layers.flatMap((l) => (l.kind === 'npc' ? (l.items ?? []).map((i) => i.characterId) : [])))
+  // El nombre del NPC no sale de la PC del DM salvo que este mapa lo revele. Se numeran por su
+  // orden en el mapa (no por el de los visibles) para que el número no cambie cuando aparece otro.
+  const npcNumber = new Map(m.characters.map((c, i) => [c.id, i + 1]))
+  const anonymize = (c: Character): Character => (m.revealNpcNames ? c : { ...c, name: `NPC ${npcNumber.get(c.id)}` })
   const characters = m.characters
     .filter((c) => visibleNpc.has(c.id))
     .map(withoutStats)
+    .map(anonymize)
 
   // En el orden de combate sólo aparecen los que el jugador ve.
   const known = new Set([...partyIds, ...characters.map((c) => c.id)])

@@ -7,4 +7,6 @@ export type AssetDef = {
   h: number
   category: AssetCategory
   label: string
+  /** Subcarpeta de assets/ de la que salió. Ausente para los sueltos en la raíz. */
+  pack?: string
 }

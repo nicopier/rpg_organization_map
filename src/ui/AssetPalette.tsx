@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ASSETS, assetUrl } from '../assets/catalog'
+import { ASSETS, assetUrl, PACKS, packLabel } from '../assets/catalog'
 import { CATEGORY_LABELS } from '../assets/overrides'
 import type { AssetCategory, AssetDef } from '../assets/types'
 import { useMap } from '../state/mapStore'
@@ -7,11 +7,14 @@ import { ColorSwatches, Segmented } from './fields'
 
 const FLAT_COLORS = ['#2b2b2b', '#5b4a3a', '#7a6a55', '#9c8f7a', '#c9bfa8', '#3f5a3a', '#2f4f6f', '#6b2f2f']
 const ORDER: AssetCategory[] = ['floor', 'structure', 'prop', 'effect', 'marker']
+/** Valor de la solapa de packs para "los sueltos en assets/", que no tienen pack. */
+const BASE = '\u0000base'
 
 /** Paleta de assets. `categories` limita qué se muestra (Piso, Objetos, Marcas usan la misma paleta). */
 export function AssetPalette({ categories = ORDER }: { categories?: AssetCategory[] }) {
   const [q, setQ] = useState('')
   const [cat, setCat] = useState<AssetCategory | 'all'>('all')
+  const [pack, setPack] = useState<string | 'all'>('all')
   const catKey = categories.join()
   const shown = useMemo(() => ORDER.filter((c) => catKey.split(',').includes(c)), [catKey])
   const tool = useMap((s) => s.tool)
@@ -21,10 +24,13 @@ export function AssetPalette({ categories = ORDER }: { categories?: AssetCategor
 
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase()
+    const inPack = (a: AssetDef) => pack === 'all' || (pack === BASE ? !a.pack : a.pack === pack)
     const match = (a: AssetDef) =>
-      (cat === 'all' || a.category === cat) && (!needle || a.label.toLowerCase().includes(needle) || a.id.toLowerCase().includes(needle))
+      (cat === 'all' || a.category === cat) &&
+      inPack(a) &&
+      (!needle || a.label.toLowerCase().includes(needle) || a.id.toLowerCase().includes(needle))
     return shown.map((c) => ({ c, items: ASSETS.filter((a) => a.category === c && match(a)) })).filter((g) => g.items.length)
-  }, [q, cat, shown])
+  }, [q, cat, pack, shown])
 
   const pick = (a: AssetDef) => {
     const s = useMap.getState()
@@ -38,6 +44,21 @@ export function AssetPalette({ categories = ORDER }: { categories?: AssetCategor
   return (
     <div className="palette">
       <input className="search" type="search" placeholder="Buscar asset…" value={q} onChange={(e) => setQ(e.target.value)} />
+
+      {PACKS.length > 0 && <div className="chips packs">
+        <button className={pack === 'all' ? 'on' : ''} onClick={() => setPack('all')}>
+          Todos
+        </button>
+        <button className={pack === BASE ? 'on' : ''} onClick={() => setPack(BASE)}>
+          Base
+        </button>
+        {PACKS.map((p) => (
+          <button key={p} className={pack === p ? 'on' : ''} onClick={() => setPack(p)} title={`assets/${p}`}>
+            {packLabel(p)}
+          </button>
+        ))}
+      </div>}
+
       {shown.length > 1 && <div className="chips">
         <button className={cat === 'all' ? 'on' : ''} onClick={() => setCat('all')}>
           Todos
@@ -82,7 +103,7 @@ export function AssetPalette({ categories = ORDER }: { categories?: AssetCategor
                 key={a.id}
                 className={`asset${isOn(a) ? ' on' : ''}`}
                 onClick={() => pick(a)}
-                title={`${a.label} (${a.w}×${a.h})`}
+                title={`${a.label} (${a.w}×${a.h})${a.pack ? ` — ${packLabel(a.pack)}` : ''}`}
                 draggable={false}
               >
                 <span className="thumb">

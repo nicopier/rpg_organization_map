@@ -7,7 +7,9 @@ import { createGameServer, lanUrls } from './core'
 const root = join(import.meta.dirname, '..')
 const dist = join(root, 'dist')
 const port = Number(process.env.PORT ?? 3000)
-const game = createGameServer(join(root, 'data'))
+// MAPPA_DATA mueve la campaña a otra carpeta (sacarla de OneDrive, o aislar una de prueba).
+// `npm run dev` ya lo respetaba; acá faltaba.
+const game = createGameServer(process.env.MAPPA_DATA ?? join(root, 'data'))
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

@@ -189,6 +189,38 @@ export function rotateItems(ids: string[]) {
   })
 }
 
+/** Tope de tamaño: más que esto no entra en ningún mapa razonable y evita un typo de 3 dígitos. */
+export const MAX_ITEM_CELLS = 20
+
+/**
+ * Cambia el footprint de objetos ya colocados, en casillas.
+ * `size` puede ser fijo o depender de cada objeto (para agrandar/achicar de a uno).
+ * Se recorta para que el objeto no se salga del mapa; los tokens de personaje no se tocan.
+ */
+export function resizeItems(ids: string[], size: { w: number; h: number } | ((it: Placement) => { w: number; h: number })) {
+  change((d) => {
+    for (const id of ids) {
+      const f = findDraftItem(d, id)
+      if (!f || f.item.assetId === TOKEN_ASSET) continue
+      const it = f.item
+      const want = typeof size === 'function' ? size(it) : size
+      // El objeto se queda donde está: el tope es lo que hay entre su esquina y el borde.
+      const w = Math.max(1, Math.min(Math.round(want.w), MAX_ITEM_CELLS, d.grid.cols - it.x))
+      const h = Math.max(1, Math.min(Math.round(want.h), MAX_ITEM_CELLS, d.grid.rows - it.y))
+      it.w = w
+      it.h = h
+    }
+  })
+}
+
+/** Devuelve el footprint que tendría el asset sin rotar, ya intercambiado si el objeto está de costado. */
+export function baseSize(it: Placement): { w: number; h: number } {
+  const swap = it.rot === 90 || it.rot === 270
+  const a = getAsset(it.assetId)
+  if (!a) return { w: it.w, h: it.h }
+  return swap ? { w: a.h, h: a.w } : { w: a.w, h: a.h }
+}
+
 export function flipItems(ids: string[]) {
   change((d) => {
     for (const id of ids) {
@@ -693,6 +725,14 @@ export function updateLayer(id: string, patch: Partial<Layer>) {
 export function setFogEnabled(enabled: boolean) {
   change((d) => {
     d.fog.enabled = enabled
+  })
+}
+
+/** Revela u oculta los nombres de los NPC de este mapa para los jugadores. */
+export function setRevealNpcNames(reveal: boolean) {
+  change((d) => {
+    if (reveal) d.revealNpcNames = true
+    else delete d.revealNpcNames
   })
 }
 

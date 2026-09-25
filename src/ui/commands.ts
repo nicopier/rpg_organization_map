@@ -1,7 +1,7 @@
 import { canMove } from '../model/queries'
 import type { Rotation } from '../model/types'
 import { currentScene } from '../render/Scene'
-import { deleteSelection, duplicateItems, flipItems, rotateItems, setPositions, toggleHiddenSelection } from '../state/actions'
+import { deleteSelection, duplicateItems, flipItems, resizeItems, rotateItems, setPositions, toggleHiddenSelection } from '../state/actions'
 import { useMap, type Tool } from '../state/mapStore'
 import { refreshGhost } from '../tools/placeItem'
 
@@ -56,6 +56,12 @@ export function flipSelection() {
   }
   const ids = movableSelection()
   if (ids.length) flipItems(ids)
+}
+
+/** Agranda (+1) o achica (−1) el footprint de lo seleccionado. `resizeItems` recorta contra el mapa. */
+export function growSelection(delta: 1 | -1) {
+  const ids = movableSelection()
+  if (ids.length) resizeItems(ids, (it) => ({ w: it.w + delta, h: it.h + delta }))
 }
 
 export function duplicateSelection() {
