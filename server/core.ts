@@ -1,6 +1,6 @@
 // Servidor de la partida: guarda la campaña, sincroniza al DM y reparte a cada jugador sólo lo que puede ver.
 // Se monta sobre cualquier servidor HTTP: el de Vite en desarrollo (plugin) o el de server/main.ts.
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomInt } from 'node:crypto'
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
@@ -11,11 +11,15 @@ import { WebSocket, WebSocketServer } from 'ws'
 import { layerOfKind, migrateCampaign } from '../src/model/mapDoc'
 import { projectForPlayer } from '../src/model/projection'
 import { TOKEN_ASSET, type Campaign, type Character } from '../src/model/types'
-import type { ClientMsg, ServerMsg } from '../src/net/protocol'
+import { DiceError, evaluate, format, parse } from '../src/dice/notation'
+import type { ClientMsg, LogEntry, ServerMsg } from '../src/net/protocol'
 
 enablePatches()
 
-type Client = { ws: WebSocket; role: 'dm' | 'player' | null; playerId: string | null; key: string | null; local: boolean }
+type Client = { ws: WebSocket; role: 'dm' | 'player' | null; playerId: string | null; key: string | null; local: boolean; hits: number[] }
+
+const LOG_MAX = 500
+const DM_COLOR = '#ffcc33'
 
 const MAX_UPLOAD = 5 * 1024 * 1024
 const IMAGE_TYPES: [string, (b: Buffer) => boolean][] = [
@@ -28,6 +32,7 @@ const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif:
 
 const isLoopback = (addr?: string) => addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+const TUNNEL_URL = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/
 
 /**
  * ¿El pedido viene de un navegador en esta misma PC? No alcanza con la IP: un túnel
@@ -61,6 +66,7 @@ export function lanUrls(port: string | number): string[] {
 export function createGameServer(dataDir: string) {
   const uploadsDir = join(dataDir, 'uploads')
   const file = join(dataDir, 'campaign.json')
+  const logFile = join(dataDir, 'log.json')
   mkdirSync(uploadsDir, { recursive: true })
 
   let campaign: Campaign | null = null
@@ -72,7 +78,20 @@ export function createGameServer(dataDir: string) {
     }
   }
 
+  /** Tiradas y chat. Va aparte de la campaña: no entra en los parches ni en el deshacer del DM. */
+  let log: LogEntry[] = []
+  if (existsSync(logFile)) {
+    try {
+      const raw = JSON.parse(readFileSync(logFile, 'utf8'))
+      if (Array.isArray(raw)) log = raw.slice(-LOG_MAX)
+    } catch (e) {
+      console.error('[mappaneitor] No se pudo leer el log de tiradas:', e)
+    }
+  }
+
   const clients = new Set<Client>()
+  /** Dirección pública del túnel activo. Vive en memoria: cambia en cada sesión. */
+  let tunnelUrl: string | null = null
   const wss = new WebSocketServer({ noServer: true, maxPayload: 20 * 1024 * 1024 })
 
   /* ---------- Persistencia ---------- */
@@ -97,6 +116,20 @@ export function createGameServer(dataDir: string) {
   // La migración puede haber completado datos (p. ej. claves de invitación): se guardan ya,
   // para que un reinicio no genere claves nuevas y deje sin efecto los links que ya se mandaron.
   if (campaign) save()
+
+  let logTimer: ReturnType<typeof setTimeout> | null = null
+  const saveLog = () => {
+    if (logTimer) clearTimeout(logTimer)
+    logTimer = setTimeout(() => {
+      try {
+        mkdirSync(dataDir, { recursive: true })
+        writeFileSync(logFile + '.tmp', JSON.stringify(log))
+        renameSync(logFile + '.tmp', logFile)
+      } catch (e) {
+        console.error('[mappaneitor] No se pudo guardar el log de tiradas:', e)
+      }
+    }, 400)
+  }
 
   /* ---------- Envíos ---------- */
 
@@ -147,6 +180,89 @@ export function createGameServer(dataDir: string) {
     }
   }
 
+  /* ---------- Log: tiradas y chat ---------- */
+
+  /** Lo que un cliente puede ver de una entrada: entera, sin resultado (secreta ajena) o nada. */
+  const visibleTo = (e: LogEntry, c: Client): LogEntry | null => {
+    if (c.role === 'dm') return e
+    const me = c.playerId
+    if (c.role !== 'player' || !me) return null
+    if (e.vis === 'public' || e.from === me) return e
+    if (e.vis === 'whisper') return e.to === me ? e : null
+    // Secreta de otro: se ve que alguien tiró, no qué ni qué salió.
+    return { id: e.id, ts: e.ts, from: e.from, name: e.name, color: e.color, kind: e.kind, vis: e.vis, hidden: true }
+  }
+
+  const sendLog = (c: Client) => send(c, { t: 'log', entries: log.map((e) => visibleTo(e, c)).filter((e): e is LogEntry => !!e) })
+
+  const addEntry = (e: LogEntry) => {
+    log.push(e)
+    if (log.length > LOG_MAX) log = log.slice(-LOG_MAX)
+    for (const c of clients) {
+      const v = visibleTo(e, c)
+      if (v) send(c, { t: 'logEntry', entry: v })
+    }
+    saveLog()
+  }
+
+  /** Quién firma: el DM, o el personaje del jugador (su nombre si todavía no tiene). */
+  const author = (c: Client): Pick<LogEntry, 'from' | 'name' | 'color'> => {
+    if (c.role === 'dm') return { from: 'dm', name: 'DM', color: DM_COLOR }
+    const p = campaign?.players.find((x) => x.id === c.playerId)
+    const ch = campaign?.party.find((x) => x.owner === c.playerId)
+    return { from: c.playerId!, name: ch?.name || p?.name || 'Jugador', color: ch?.color ?? p?.color ?? '#888888' }
+  }
+
+  /** Freno anti-spam: hasta 8 tiradas o mensajes cada 2 segundos por conexión. */
+  const flooding = (c: Client) => {
+    const now = Date.now()
+    c.hits = c.hits.filter((t) => now - t < 2000)
+    if (c.hits.length >= 8) return true
+    c.hits.push(now)
+    return false
+  }
+
+  const handleLog = (c: Client, msg: ClientMsg) => {
+    if (msg.t === 'clearLog') {
+      if (c.role !== 'dm') return
+      log = []
+      for (const x of clients) if (x.role) send(x, { t: 'log', entries: [] })
+      return saveLog()
+    }
+    if (msg.t !== 'roll' && msg.t !== 'chat') return
+    if (flooding(c)) return send(c, { t: 'rollError', message: 'Más despacio: esperá un segundo.' })
+    const base = { id: randomBytes(6).toString('hex'), ts: Date.now(), ...author(c) }
+
+    if (msg.t === 'roll') {
+      try {
+        const terms = parse(str(msg.expr, 200, ''))
+        const label = str(msg.label, 60, '').trim()
+        addEntry({
+          ...base,
+          kind: 'roll',
+          vis: msg.secret ? 'secret' : 'public',
+          expr: format(terms),
+          ...(label ? { label } : {}),
+          result: evaluate(terms, (sides) => randomInt(1, sides + 1)),
+        })
+      } catch (e) {
+        if (!(e instanceof DiceError)) throw e
+        send(c, { t: 'rollError', message: e.message })
+      }
+      return
+    }
+
+    const text = str(msg.text, 500, '').trim()
+    if (!text) return
+    if (msg.to === undefined || msg.to === null || msg.to === '') return addEntry({ ...base, kind: 'chat', vis: 'public', text })
+    // Susurro: al DM o a un jugador que exista, y nunca a uno mismo.
+    const to = str(msg.to, 40, '')
+    const target = to === 'dm' ? 'DM' : campaign?.players.find((p) => p.id === to)?.name
+    if (!target || to === base.from) return
+    const toChar = to === 'dm' ? undefined : campaign?.party.find((x) => x.owner === to)?.name
+    addEntry({ ...base, kind: 'chat', vis: 'whisper', to, toName: toChar || target, text })
+  }
+
   const ownChar = (c: Client, id: string): Character | undefined =>
     campaign?.party.find((p) => p.id === id && c.playerId && p.owner === c.playerId)
 
@@ -159,6 +275,7 @@ export function createGameServer(dataDir: string) {
         if (!c.local) return send(c, { t: 'error', message: 'La vista del DM sólo se abre desde la PC del servidor.' })
         c.role = 'dm'
         send(c, { t: 'welcome', role: 'dm', campaign })
+        sendLog(c)
         return send(c, { t: 'presence', online: online() })
       }
       c.role = 'player'
@@ -169,7 +286,13 @@ export function createGameServer(dataDir: string) {
       c.playerId = seat.id
       c.key = seat.key!
       send(c, { t: 'welcome', role: 'player', playerId: c.playerId, view: projectForPlayer(campaign, c.playerId) })
+      sendLog(c)
       return pushPresence()
+    }
+
+    if (msg.t === 'roll' || msg.t === 'chat' || msg.t === 'clearLog') {
+      if (c.role === 'dm' || (c.role === 'player' && c.playerId)) handleLog(c, msg)
+      return
     }
 
     if (c.role === 'dm') {
@@ -266,7 +389,7 @@ export function createGameServer(dataDir: string) {
   }
 
   wss.on('connection', (ws, req: IncomingMessage) => {
-    const c: Client = { ws, role: null, playerId: null, key: null, local: isLocalRequest(req) }
+    const c: Client = { ws, role: null, playerId: null, key: null, local: isLocalRequest(req), hits: [] }
     clients.add(c)
     ws.on('message', (raw) => {
       let msg: ClientMsg
@@ -297,9 +420,34 @@ export function createGameServer(dataDir: string) {
   const http = (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = new URL(req.url ?? '/', 'http://x')
 
+    // Direcciones para armar los links: sólo para el DM (desde afuera no se ven las IPs de la casa).
     if (url.pathname === '/api/info' && req.method === 'GET') {
+      if (!isLocalRequest(req)) return json(res, 403, { error: 'Sólo desde la PC del DM.' })
       const port = (req.headers.host ?? '').split(':')[1] ?? '80'
-      return json(res, 200, { lan: lanUrls(port) })
+      return json(res, 200, { lan: lanUrls(port), tunnel: tunnelUrl })
+    }
+
+    // npm run tunnel avisa la dirección pública que le dio cloudflared (o null al cerrarse).
+    if (url.pathname === '/api/tunnel' && req.method === 'POST') {
+      if (!isLocalRequest(req)) return json(res, 403, { error: 'Sólo desde la PC del DM.' })
+      let body = ''
+      req.on('data', (ch: Buffer) => {
+        body += ch
+        if (body.length > 1000) req.destroy()
+      })
+      req.on('end', () => {
+        let next: unknown
+        try {
+          next = (JSON.parse(body) as { url?: unknown }).url
+        } catch {
+          return json(res, 400, { error: 'JSON inválido.' })
+        }
+        if (next !== null && !(typeof next === 'string' && TUNNEL_URL.test(next))) return json(res, 400, { error: 'Dirección inválida.' })
+        tunnelUrl = next as string | null
+        console.log(tunnelUrl ? `[mappaneitor] Túnel: ${tunnelUrl}` : '[mappaneitor] Túnel cerrado')
+        json(res, 200, { ok: true })
+      })
+      return
     }
 
     if (url.pathname === '/api/upload' && req.method === 'POST') {

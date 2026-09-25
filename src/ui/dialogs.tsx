@@ -101,9 +101,12 @@ export function GridSettings({ onClose }: { onClose: () => void }) {
 const BASE_PREF = 'mappaneitor:inviteBase'
 const CUSTOM_PREF = 'mappaneitor:inviteCustom'
 const CUSTOM = '@custom'
+/** La dirección que anunció npm run tunnel; se guarda como marcador para seguirla si cambia. */
+const TUNNEL = '@tunnel'
 
 export function InviteDialog({ onClose }: { onClose: () => void }) {
   const [lan, setLan] = useState<string[] | null>(null)
+  const [tunnel, setTunnel] = useState<string | null>(null)
   const [base, setBase] = useState(() => readPref(BASE_PREF, ''))
   const [custom, setCustom] = useState(() => readPref(CUSTOM_PREF, ''))
   const [count, setCount] = useState(4)
@@ -112,16 +115,26 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
   const party = useMap((s) => s.campaign.party)
   const online = useNet((s) => s.online)
 
+  // Se consulta seguido: si abrís o reiniciás el túnel con el diálogo abierto, aparece solo.
   useEffect(() => {
-    fetch('/api/info')
-      .then((r) => r.json())
-      .then((b: { lan: string[] }) => setLan(b.lan.map((u) => new URL(u).origin)))
-      .catch(() => setLan([]))
+    const load = () =>
+      fetch('/api/info')
+        .then((r) => r.json())
+        .then((b: { lan: string[]; tunnel?: string | null }) => {
+          setLan(b.lan.map((u) => new URL(u).origin))
+          setTunnel(b.tunnel ?? null)
+        })
+        .catch(() => setLan((l) => l ?? []))
+    load()
+    const t = setInterval(load, 3000)
+    return () => clearInterval(t)
   }, [])
 
-  const options = [...(lan ?? []), CUSTOM]
-  const chosen = options.includes(base) ? base : (lan?.[0] ?? CUSTOM)
-  const origin = chosen === CUSTOM ? custom.trim() : chosen
+  const options = [...(tunnel ? [TUNNEL] : []), ...(lan ?? []), CUSTOM]
+  // Con un túnel activo se usa ése, salvo que hayas elegido a propósito una dirección de wifi.
+  const pickedLan = !!lan?.includes(base)
+  const chosen = tunnel && !pickedLan ? TUNNEL : options.includes(base) ? base : (lan?.[0] ?? CUSTOM)
+  const origin = chosen === TUNNEL ? tunnel! : chosen === CUSTOM ? custom.trim() : chosen
   const validOrigin = /^https?:\/\/[^\s/]+/.test(origin)
   const link = (key?: string) => (key && validOrigin ? inviteUrl(origin, key) : '')
   const seatName = (name: string, i: number) => name || `Invitación ${i + 1}`
@@ -153,13 +166,20 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
               writePref(BASE_PREF, e.target.value)
             }}
           >
+            {tunnel && <option value={TUNNEL}>{tunnel} (internet, automática)</option>}
             {(lan ?? []).map((u) => (
               <option key={u} value={u}>
                 {u} (misma wifi)
               </option>
             ))}
-            <option value={CUSTOM}>Dirección de internet (túnel)…</option>
+            <option value={CUSTOM}>Otra dirección de internet…</option>
           </select>
+          {chosen === TUNNEL && <small className="hint">La trajo sola <code>npm run tunnel</code>. Si reiniciás el túnel, se actualiza acá.</small>}
+          {!tunnel && chosen !== CUSTOM && (
+            <small className="hint">
+              Para jugar por internet corré <code>npm run tunnel</code> en otra terminal: la dirección aparece acá sola.
+            </small>
+          )}
         </label>
         {chosen === CUSTOM && (
           <label>
@@ -173,7 +193,7 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
               }}
             />
             <small className="hint">
-              La que te da el túnel (<code>npm run tunnel</code>). Si cambia, pegá la nueva y los links se actualizan solos: las claves son las mismas.
+              Sólo si abriste el túnel a mano. Con <code>npm run tunnel</code> la dirección se carga sola.
             </small>
           </label>
         )}
@@ -238,7 +258,7 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
           <p className="hint">Todavía no hay invitaciones. Generá una por jugador.</p>
         )}
 
-        {chosen !== CUSTOM && (
+        {chosen !== CUSTOM && chosen !== TUNNEL && (
           <p className="hint">
             Con la dirección de wifi tienen que estar en tu misma red. Si no carga desde otro dispositivo, puede ser el firewall de Windows: permití el
             acceso a Node.js en redes privadas.

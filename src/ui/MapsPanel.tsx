@@ -73,7 +73,8 @@ function FoldedMaps({ onOpen }: { onOpen: () => void }) {
   )
 }
 
-function MapsTree({ onFold }: { onFold: () => void }) {
+/** Árbol de mapas. `embedded`: va adentro de otra columna (pestaña Mapas del modo juego), sin aside propio. */
+export function MapsTree({ onFold, embedded }: { onFold?: () => void; embedded?: boolean }) {
   const campaign = useMap((s) => s.campaign)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
@@ -95,13 +96,15 @@ function MapsTree({ onFold }: { onFold: () => void }) {
   for (const m of partyLocation(campaign).values()) if (m) partyCount.set(m, (partyCount.get(m) ?? 0) + 1)
 
   return (
-    <aside className="side left maps-panel">
+    <Wrap className={embedded ? 'maps-embed' : 'side left maps-panel'} embedded={embedded}>
       <div className="campaign-head">
         <Icon name="grid" size={18} />
         <CommitText className="campaign-name" value={campaign.name} onCommit={(v) => renameCampaign(v.trim() || 'Mi campaña')} aria-label="Nombre de la campaña" />
-        <button className="icon-btn tiny" onClick={onFold} title="Esconder la lista de mapas" aria-label="Esconder la lista de mapas">
-          <Icon name="prev" size={14} />
-        </button>
+        {onFold && (
+          <button className="icon-btn tiny" onClick={onFold} title="Esconder la lista de mapas" aria-label="Esconder la lista de mapas">
+            <Icon name="prev" size={14} />
+          </button>
+        )}
       </div>
       <Tree.Provider value={{ collapsed, toggle, drag, setDrag, over, setOver, partyCount }}>
         <div
@@ -130,8 +133,12 @@ function MapsTree({ onFold }: { onFold: () => void }) {
           {drag && <p className="hint tree-hint">Soltá arriba de una fila para ponerlo antes, en el medio para meterlo adentro, o acá para dejarlo en la raíz.</p>}
         </div>
       </Tree.Provider>
-    </aside>
+    </Wrap>
   )
+}
+
+function Wrap({ embedded, className, children }: { embedded?: boolean; className: string; children: ReactNode }) {
+  return embedded ? <div className={className}>{children}</div> : <aside className={className}>{children}</aside>
 }
 
 function Branch({ parentId, depth }: { parentId: string | null; depth: number }) {

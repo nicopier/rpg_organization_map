@@ -15,6 +15,7 @@
     "tunnel:dev": "node scripts/tunnel.mjs 5173"
   },
   "dependencies": {
+    "@3d-dice/dice-box-threejs": "^0.0.12",
     "idb-keyval": "^6.3.0",
     "immer": "^11.1.18",
     "pixi.js": "^8.21.0",

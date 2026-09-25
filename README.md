@@ -32,7 +32,7 @@ npm start
 **3. Elegí la dirección para los links**:
 
 - **Misma wifi**: en **Invitar → Dirección de esta PC** elegí la dirección de tu red (`http://192.168…`). Si no carga desde otro dispositivo, permití Node.js en el firewall de Windows (redes privadas).
-- **Por internet**: en **otra** terminal corré `npm run tunnel`. Copiá la dirección `https://….trycloudflare.com` que aparece en el recuadro, y en **Invitar → Dirección de esta PC → "Dirección de internet (túnel)"** pegala en **Dirección pública**.
+- **Por internet**: en **otra** terminal corré `npm run tunnel` y dejala abierta. La dirección pública se carga sola en **Invitar** (aparece como "internet, automática"); si reiniciás el túnel, se actualiza sola.
 
 **4. Generá las invitaciones**: en **Invitar**, poné cuántos jugadores son y tocá **+ invitaciones**. Después **Copiar todos** y mandá los links (uno por persona).
 
@@ -42,7 +42,7 @@ npm start
 
 **Al terminar**: `Ctrl+C` en las terminales. La campaña queda guardada.
 
-**La próxima sesión**: repetí los pasos 1 a 3. El túnel da una dirección nueva cada vez: pegala en Invitar y reenviá los links (las claves de cada jugador no cambian).
+**La próxima sesión**: repetí los pasos 1 a 3. El túnel da una dirección nueva cada vez, así que reenviá los links desde Invitar (las claves de cada jugador no cambian).
 
 ## Qué hace
 
@@ -58,6 +58,13 @@ npm start
 - **Mover y borrar**: en modo Juego movés y borrás objetos, NPCs y marcas. Los personajes de los jugadores quedan fijos para no tocarlos sin querer; **Alt + arrastrar** los mueve igual.
 - **Congelar jugadores**: el botón de la barra de arriba bloquea el movimiento de todos. El candado de cada personaje en **Party** bloquea sólo a ese. El jugador ve el aviso y el servidor rechaza sus movimientos.
 - **Party separada**: cada jugador ve el mapa donde está su personaje; en **Party** se ve dónde está cada uno (General › Patio › Cripta).
+
+## Dados y chat
+
+- **Panel Dados** (a la izquierda en modo Juego; el DM lo alterna con **Mapas**): clic suma un dado, clic derecho lo saca, más modificador y ventaja/desventaja. En el chat, `/r 1d20+5 Ataque` tira con etiqueta (entiende `2d6+3`, `4d6kh3`, `d%`, `1d20 adv`).
+- **Sin trampa**: el servidor tira y los dados 3D caen en ese resultado. Clic en el total repite la tirada.
+- **Secretas**: el DM tira en secreto; un jugador puede tirar "sólo al DM". Los demás ven que alguien tiró, no qué salió.
+- **Chat y susurros**: mensajes para todos o susurros a un jugador o al DM (el DM ve todos los susurros). El log queda guardado en `data/log.json`; el DM lo vacía desde **Opciones**.
 
 ## Jugadores y seguridad
 

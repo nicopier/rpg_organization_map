@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Campaign } from '../model/types'
+import { logActions } from '../state/logStore'
 import { onLocalPatches, useMap } from '../state/mapStore'
 import { net } from './bridge'
 import type { ClientMsg, ServerMsg } from './protocol'
@@ -62,6 +63,9 @@ function open(hello: () => ClientMsg, onMessage: (m: ServerMsg) => void, onOpen?
       }
       if (msg.t === 'presence') useNet.setState({ online: msg.online })
       else if (msg.t === 'error') useNet.setState({ error: msg.message, ready: false })
+      else if (msg.t === 'log') logActions.set(msg.entries)
+      else if (msg.t === 'logEntry') logActions.add(msg.entry)
+      else if (msg.t === 'rollError') logActions.error(msg.message)
       else onMessage(msg)
     }
     ws.onclose = () => {

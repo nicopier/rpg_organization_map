@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Section, Toast } from './App'
+import { readPref, Section, Toast, useUnread, writePref } from './App'
+import { DiceStage } from './dice/DiceStage'
 import { layerOfKind, PLAYER_COLORS } from './model/mapDoc'
 import { net } from './net/bridge'
 import { connectPlayer, useNet } from './net/client'
 import { useMap } from './state/mapStore'
+import { DicePanel } from './ui/DicePanel'
 import { ColorSwatches } from './ui/fields'
 import { Icon } from './ui/Icon'
 import { ImagePicker } from './ui/ImagePicker'
@@ -110,7 +112,52 @@ function CharacterSetup() {
   )
 }
 
+function useNarrow(query = '(max-width: 900px)') {
+  const [narrow, setNarrow] = useState(() => matchMedia(query).matches)
+  useEffect(() => {
+    const m = matchMedia(query)
+    const on = () => setNarrow(m.matches)
+    m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [query])
+  return narrow
+}
+
+const PLAYER_TAB_PREF = 'mappaneitor:playerTab'
+
+/** Celular / pantalla angosta: una sola franja abajo, con pestañas Dados / Personaje. */
+function BottomTabs() {
+  const [tab, setTabState] = useState(() => readPref(PLAYER_TAB_PREF, 'me'))
+  const setTab = (t: string) => {
+    setTabState(t)
+    writePref(PLAYER_TAB_PREF, t)
+  }
+  const unread = useUnread(tab === 'dice')
+  return (
+    <aside className="side right">
+      <div className="tabs">
+        <button className={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>
+          <Icon name="token" size={15} /> Personaje
+        </button>
+        <button className={`unread-host${tab === 'dice' ? ' on' : ''}`} onClick={() => setTab('dice')}>
+          <Icon name="dice" size={15} /> Dados
+          {unread > 0 && <span className="unread">{unread > 9 ? '9+' : unread}</span>}
+        </button>
+      </div>
+      {tab === 'dice' ? <DicePanel /> : <PlayerSideBody />}
+    </aside>
+  )
+}
+
 function PlayerSide() {
+  return (
+    <aside className="side right">
+      <PlayerSideBody />
+    </aside>
+  )
+}
+
+function PlayerSideBody() {
   const me = useMap((s) => s.me)
   const party = useMap((s) => s.campaign.party)
   const players = useMap((s) => s.campaign.players)
@@ -122,39 +169,37 @@ function PlayerSide() {
   const playerName = (id: string) => players.find((p) => p.id === id)?.name ?? 'DM'
 
   return (
-    <aside className="side right">
-      <div className="side-scroll">
-        {mine.map((ch) => (
-          <Section key={ch.id} id={`me-${ch.id}`} title={ch.name} icon="token">
-            {!onMap(ch.id) && <p className="hint">Tu personaje todavía no está en este mapa: el DM lo va a traer.</p>}
-            <CharacterSheet ch={ch} />
-          </Section>
-        ))}
-        <Section id="combat" title="Iniciativa" icon="sword" extra={combat.active ? <span className="badge live">Ronda {combat.round}</span> : undefined}>
-          <InitiativeTracker />
+    <div className="side-scroll">
+      {mine.map((ch) => (
+        <Section key={ch.id} id={`me-${ch.id}`} title={ch.name} icon="token">
+          {!onMap(ch.id) && <p className="hint">Tu personaje todavía no está en este mapa: el DM lo va a traer.</p>}
+          <CharacterSheet ch={ch} />
         </Section>
-        <Section id="party" title="Party" icon="layers">
-          {others.length ? (
-            <ul className="party-list">
-              {others.map((c) => (
-                <li key={c.id}>
-                  <Avatar ch={c} />
-                  <div className="who">
-                    <span className="name">
-                      {c.name}
-                      <small> · {playerName(c.owner)}</small>
-                    </span>
-                    {c.hp.cur <= 0 && <span className="mini-hp">Caído</span>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="hint">Todavía no hay otros personajes.</p>
-          )}
-        </Section>
-      </div>
-    </aside>
+      ))}
+      <Section id="combat" title="Iniciativa" icon="sword" extra={combat.active ? <span className="badge live">Ronda {combat.round}</span> : undefined}>
+        <InitiativeTracker />
+      </Section>
+      <Section id="party" title="Party" icon="layers">
+        {others.length ? (
+          <ul className="party-list">
+            {others.map((c) => (
+              <li key={c.id}>
+                <Avatar ch={c} />
+                <div className="who">
+                  <span className="name">
+                    {c.name}
+                    <small> · {playerName(c.owner)}</small>
+                  </span>
+                  {c.hp.cur <= 0 && <span className="mini-hp">Caído</span>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="hint">Todavía no hay otros personajes.</p>
+        )}
+      </Section>
+    </div>
   )
 }
 
@@ -171,6 +216,7 @@ export function PlayerApp() {
   const myName = useMap((s) => s.campaign.players.find((p) => p.id === s.me)?.name)
   const named = !!myName
   const frozen = useMap((s) => !!s.campaign.movementLocked || s.campaign.party.some((c) => c.owner === s.me && c.moveLocked))
+  const narrow = useNarrow()
   useShortcuts()
 
   useEffect(() => connectPlayer(), [])
@@ -211,6 +257,14 @@ export function PlayerApp() {
         <span className={`save-status ${status}`}>{status === 'online' ? 'Conectado' : 'Reconectando…'}</span>
       </header>
       <main className="workspace player-layout">
+        {!narrow && (
+          <aside className="side left play-left">
+            <div className="side-title">
+              <Icon name="dice" size={15} /> Dados y chat
+            </div>
+            <DicePanel />
+          </aside>
+        )}
         <div className="canvas-col">
           <MapCanvas />
           {noTable && <div className="waiting">Esperando que el DM lleve la party a un mapa…</div>}
@@ -222,8 +276,9 @@ export function PlayerApp() {
             </div>
           )}
         </div>
-        <PlayerSide />
+        {narrow ? <BottomTabs /> : <PlayerSide />}
       </main>
+      <DiceStage />
       <Toast />
     </div>
   )

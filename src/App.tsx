@@ -2,14 +2,17 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { loadLocalCampaign, startLocalBackup } from './io/autosave'
 import { readJsonFile } from './io/serialize'
 import { importMapInto, migrateCampaign } from './model/mapDoc'
+import { DiceStage } from './dice/DiceStage'
 import { connectDm, replaceCampaign, useNet } from './net/client'
+import { useLog } from './state/logStore'
 import { useMap } from './state/mapStore'
+import { DicePanel } from './ui/DicePanel'
 import { Icon, type IconName } from './ui/Icon'
 import { InitiativeTracker } from './ui/InitiativeTracker'
 import { InspectorPanel } from './ui/InspectorPanel'
 import { LayerPanel } from './ui/LayerPanel'
 import { MapCanvas } from './ui/MapCanvas'
-import { MapsPanel } from './ui/MapsPanel'
+import { MapsPanel, MapsTree } from './ui/MapsPanel'
 import { Toolbar } from './ui/Toolbar'
 import { useShortcuts } from './ui/useShortcuts'
 
@@ -88,6 +91,85 @@ function RightPanel() {
           <LayerPanel />
         </Section>
       </div>
+    </aside>
+  )
+}
+
+const LEFT_TAB_PREF = 'mappaneitor:leftTab'
+const LEFT_FOLD_PREF = 'mappaneitor:leftFolded'
+
+/** Cuenta las entradas nuevas del log mientras no se mira: para el puntito de la pestaña. */
+export function useUnread(watching: boolean): number {
+  const count = useLog((s) => s.entries.length)
+  const [seen, setSeen] = useState(count)
+  useEffect(() => {
+    if (watching || count < seen) setSeen(count)
+  }, [watching, count, seen])
+  return watching ? 0 : Math.max(0, count - seen)
+}
+
+/** Columna izquierda. En edición, el árbol de mapas; jugando, pestañas Mapas / Dados. */
+function LeftPanel() {
+  const mode = useMap((s) => s.mode)
+  const [tab, setTabState] = useState(() => readPref(LEFT_TAB_PREF, 'dice'))
+  const [folded, setFoldedState] = useState(() => readPref(LEFT_FOLD_PREF, '0') === '1')
+  const setTab = (t: string) => {
+    setTabState(t)
+    writePref(LEFT_TAB_PREF, t)
+  }
+  const setFolded = (v: boolean) => {
+    setFoldedState(v)
+    writePref(LEFT_FOLD_PREF, v ? '1' : '0')
+  }
+  const unread = useUnread(mode === 'play' && !folded && tab === 'dice')
+
+  if (mode === 'edit') return <MapsPanel />
+  if (folded)
+    return (
+      <aside className="side left folded">
+        <button className="icon-btn" onClick={() => setFolded(false)} title="Mostrar el panel" aria-label="Mostrar el panel">
+          <Icon name="next" size={16} />
+        </button>
+        <button
+          className="icon-btn"
+          onClick={() => {
+            setTab('maps')
+            setFolded(false)
+          }}
+          title="Mapas"
+          aria-label="Mapas"
+        >
+          <Icon name="grid" size={18} />
+        </button>
+        <button
+          className="icon-btn unread-host"
+          onClick={() => {
+            setTab('dice')
+            setFolded(false)
+          }}
+          title="Dados y chat"
+          aria-label="Dados y chat"
+        >
+          <Icon name="dice" size={18} />
+          {unread > 0 && <span className="unread">{unread > 9 ? '9+' : unread}</span>}
+        </button>
+      </aside>
+    )
+  return (
+    <aside className="side left play-left">
+      <div className="tabs">
+        <button className={tab === 'maps' ? 'on' : ''} onClick={() => setTab('maps')}>
+          <Icon name="grid" size={15} /> Mapas
+        </button>
+        <button className={`unread-host${tab === 'dice' ? ' on' : ''}`} onClick={() => setTab('dice')}>
+          <Icon name="dice" size={15} /> Dados
+          {unread > 0 && <span className="unread">{unread > 9 ? '9+' : unread}</span>}
+        </button>
+        <button className="icon-btn tab-fold" onClick={() => setFolded(true)} title="Esconder el panel" aria-label="Esconder el panel">
+          <Icon name="prev" size={14} />
+        </button>
+      </div>
+      {tab === 'maps' ? <MapsTree embedded /> : <DicePanel />}
     </aside>
   )
 }
@@ -202,10 +284,11 @@ export function App() {
     <div className="app">
       <Toolbar />
       <main className="workspace">
-        <MapsPanel />
+        <LeftPanel />
         <MapCanvas />
         <RightPanel />
       </main>
+      <DiceStage />
       <Toast />
       {dropping && <div className="drop-overlay">Soltá una campaña para abrirla, o un mapa para sumarlo</div>}
     </div>

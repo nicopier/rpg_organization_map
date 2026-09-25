@@ -18,6 +18,8 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.json': 'application/json',
+  '.mp3': 'audio/mpeg',
+  '.webp': 'image/webp',
 }
 
 const server = createServer((req, res) => {
