@@ -1,14 +1,16 @@
 // Servidor de la partida: guarda la campaña, sincroniza al DM y reparte a cada jugador sólo lo que puede ver.
 // Se monta sobre cualquier servidor HTTP: el de Vite en desarrollo (plugin) o el de server/main.ts.
 import { randomBytes, randomInt } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { applyPatches, enablePatches, produceWithPatches, type Draft, type Patch } from 'immer'
+import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate'
 import { WebSocket, WebSocketServer } from 'ws'
 import { layerOfKind, migrateCampaign } from '../src/model/mapDoc'
+import { initiativeExpr, sortCombat } from '../src/model/combat'
 import { projectForPlayer } from '../src/model/projection'
 import { TOKEN_ASSET, type Campaign, type Character } from '../src/model/types'
 import { DiceError, evaluate, format, parse } from '../src/dice/notation'
@@ -19,16 +21,22 @@ enablePatches()
 type Client = { ws: WebSocket; role: 'dm' | 'player' | null; playerId: string | null; key: string | null; local: boolean; hits: number[] }
 
 const LOG_MAX = 500
+/** Espera mínima entre dos tiradas de un mismo jugador. */
+const ROLL_COOLDOWN = 5000
 const DM_COLOR = '#ffcc33'
 
 const MAX_UPLOAD = 5 * 1024 * 1024
+const MAX_SHEET = 25 * 1024 * 1024
+const MAX_IMPORT = 300 * 1024 * 1024
+const UPLOAD_NAME = /^[a-f0-9]{16}\.(png|jpg|gif|webp|pdf)$/
 const IMAGE_TYPES: [string, (b: Buffer) => boolean][] = [
   ['png', (b) => b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))],
   ['jpg', (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
   ['gif', (b) => b.subarray(0, 3).toString() === 'GIF'],
   ['webp', (b) => b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP'],
 ]
-const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+const isPdf = (b: Buffer) => b.subarray(0, 5).toString() === '%PDF-'
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf' }
 
 const isLoopback = (addr?: string) => addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1'
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
@@ -55,6 +63,17 @@ const int = (v: unknown, min: number, max: number, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : fallback
 const str = (v: unknown, max: number, fallback: string) => (typeof v === 'string' ? v.slice(0, max) : fallback)
 
+function slug(s: string) {
+  return (
+    s
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'campana'
+  )
+}
+
 export function lanUrls(port: string | number): string[] {
   const out: string[] = []
   for (const list of Object.values(networkInterfaces())) {
@@ -63,10 +82,28 @@ export function lanUrls(port: string | number): string[] {
   return out
 }
 
+/**
+ * El PDF del Manual de monstruos: MAPPA_MANUAL, o el primer .pdf de la carpeta del proyecto
+ * con "monstru" en el nombre. Se busca en cada pedido: se puede agregar con el servidor prendido.
+ */
+function findManual(): string | null {
+  const root = join(import.meta.dirname, '..')
+  const env = process.env.MAPPA_MANUAL
+  if (env) {
+    const p = isAbsolute(env) ? env : join(root, env)
+    return existsSync(p) ? p : null
+  }
+  try {
+    const name = readdirSync(root).find((f) => /\.pdf$/i.test(f) && /monstru/i.test(f))
+    return name ? join(root, name) : null
+  } catch {
+    return null
+  }
+}
+
 export function createGameServer(dataDir: string) {
   const uploadsDir = join(dataDir, 'uploads')
   const file = join(dataDir, 'campaign.json')
-  const logFile = join(dataDir, 'log.json')
   mkdirSync(uploadsDir, { recursive: true })
 
   let campaign: Campaign | null = null
@@ -78,16 +115,13 @@ export function createGameServer(dataDir: string) {
     }
   }
 
-  /** Tiradas y chat. Va aparte de la campaña: no entra en los parches ni en el deshacer del DM. */
+  /**
+   * Tiradas y chat de la sesión. Sólo en memoria: no se guarda en disco ni en la exportación,
+   * y se vacía al reiniciar el servidor. Va aparte de la campaña (no entra en los parches ni en el deshacer).
+   */
   let log: LogEntry[] = []
-  if (existsSync(logFile)) {
-    try {
-      const raw = JSON.parse(readFileSync(logFile, 'utf8'))
-      if (Array.isArray(raw)) log = raw.slice(-LOG_MAX)
-    } catch (e) {
-      console.error('[mappaneitor] No se pudo leer el log de tiradas:', e)
-    }
-  }
+  /** Cuándo tiró por última vez cada jugador (por silla, así reconectar no saltea la espera). */
+  const lastRoll = new Map<string, number>()
 
   const clients = new Set<Client>()
   /** Dirección pública del túnel activo. Vive en memoria: cambia en cada sesión. */
@@ -116,20 +150,6 @@ export function createGameServer(dataDir: string) {
   // La migración puede haber completado datos (p. ej. claves de invitación): se guardan ya,
   // para que un reinicio no genere claves nuevas y deje sin efecto los links que ya se mandaron.
   if (campaign) save()
-
-  let logTimer: ReturnType<typeof setTimeout> | null = null
-  const saveLog = () => {
-    if (logTimer) clearTimeout(logTimer)
-    logTimer = setTimeout(() => {
-      try {
-        mkdirSync(dataDir, { recursive: true })
-        writeFileSync(logFile + '.tmp', JSON.stringify(log))
-        renameSync(logFile + '.tmp', logFile)
-      } catch (e) {
-        console.error('[mappaneitor] No se pudo guardar el log de tiradas:', e)
-      }
-    }, 400)
-  }
 
   /* ---------- Envíos ---------- */
 
@@ -187,6 +207,10 @@ export function createGameServer(dataDir: string) {
     if (c.role === 'dm') return e
     const me = c.playerId
     if (c.role !== 'player' || !me) return null
+    if (e.publicName) {
+      const { publicName, ...rest } = e
+      e = { ...rest, name: publicName }
+    }
     if (e.vis === 'public' || e.from === me) return e
     if (e.vis === 'whisper') return e.to === me ? e : null
     // Secreta de otro: se ve que alguien tiró, no qué ni qué salió.
@@ -202,12 +226,21 @@ export function createGameServer(dataDir: string) {
       const v = visibleTo(e, c)
       if (v) send(c, { t: 'logEntry', entry: v })
     }
-    saveLog()
   }
 
   /** Quién firma: el DM, o el personaje del jugador (su nombre si todavía no tiene). */
-  const author = (c: Client): Pick<LogEntry, 'from' | 'name' | 'color'> => {
-    if (c.role === 'dm') return { from: 'dm', name: 'DM', color: DM_COLOR }
+  const author = (c: Client, as?: unknown): Pick<LogEntry, 'from' | 'name' | 'color' | 'publicName'> => {
+    if (c.role === 'dm') {
+      // Tirando por un NPC: queda firmado con su nombre; los jugadores lo ven numerado si el mapa no lo revela.
+      for (const m of campaign?.maps ?? []) {
+        const i = typeof as === 'string' ? m.characters.findIndex((x) => x.id === as) : -1
+        if (i < 0) continue
+        const ch = m.characters[i]
+        const name = `DM (${ch.name})`
+        return { from: 'dm', name, color: ch.color, ...(m.revealNpcNames ? {} : { publicName: `DM (NPC ${i + 1})` }) }
+      }
+      return { from: 'dm', name: 'DM', color: DM_COLOR }
+    }
     const p = campaign?.players.find((x) => x.id === c.playerId)
     const ch = campaign?.party.find((x) => x.owner === c.playerId)
     return { from: c.playerId!, name: ch?.name || p?.name || 'Jugador', color: ch?.color ?? p?.color ?? '#888888' }
@@ -222,21 +255,36 @@ export function createGameServer(dataDir: string) {
     return false
   }
 
+  /** El DM bloqueó los dados de todos o los del personaje de este jugador. */
+  const diceLocked = (c: Client) =>
+    !!campaign && (!!campaign.diceLocked || campaign.party.some((p) => p.owner === c.playerId && p.diceLocked))
+
   const handleLog = (c: Client, msg: ClientMsg) => {
     if (msg.t === 'clearLog') {
       if (c.role !== 'dm') return
       log = []
       for (const x of clients) if (x.role) send(x, { t: 'log', entries: [] })
-      return saveLog()
+      return
     }
     if (msg.t !== 'roll' && msg.t !== 'chat') return
     if (flooding(c)) return send(c, { t: 'rollError', message: 'Más despacio: esperá un segundo.' })
-    const base = { id: randomBytes(6).toString('hex'), ts: Date.now(), ...author(c) }
+    const base = { id: randomBytes(6).toString('hex'), ts: Date.now(), ...author(c, msg.t === 'roll' ? msg.as : undefined) }
 
     if (msg.t === 'roll') {
+      if (c.role === 'player' && diceLocked(c)) return send(c, { t: 'rollError', message: 'El DM bloqueó las tiradas por ahora.' })
+      // Los jugadores esperan unos segundos entre tirada y tirada: nada de spam. El DM no.
+      const wait = c.role === 'player' ? (lastRoll.get(c.playerId!) ?? 0) + ROLL_COOLDOWN - base.ts : 0
+      if (wait > 0) {
+        send(c, { t: 'rollCooldown', ms: wait })
+        return send(c, { t: 'rollError', message: `Esperá ${Math.ceil(wait / 1000)} s para volver a tirar.` })
+      }
       try {
         const terms = parse(str(msg.expr, 200, ''))
         const label = str(msg.label, 60, '').trim()
+        if (c.role === 'player') {
+          lastRoll.set(c.playerId!, base.ts)
+          send(c, { t: 'rollCooldown', ms: ROLL_COOLDOWN })
+        }
         addEntry({
           ...base,
           kind: 'roll',
@@ -276,6 +324,7 @@ export function createGameServer(dataDir: string) {
         c.role = 'dm'
         send(c, { t: 'welcome', role: 'dm', campaign })
         sendLog(c)
+        send(c, { t: 'tunnel', url: tunnelUrl })
         return send(c, { t: 'presence', online: online() })
       }
       c.role = 'player'
@@ -328,6 +377,35 @@ export function createGameServer(dataDir: string) {
         const p = d.players.find((x) => x.id === me)
         if (p) p.name = name
       })
+    }
+
+    if (msg.t === 'initiative') {
+      // Sólo la iniciativa pendiente de su propio personaje, en un combate en curso. Vale aunque los dados estén bloqueados.
+      const ch = ownChar(c, msg.characterId)
+      const map = ch && campaign.maps.find((m) => m.combat.active && m.combat.order.some((e) => e.characterId === ch.id && e.pending))
+      if (!ch || !map) return
+      if (flooding(c)) return send(c, { t: 'rollError', message: 'Más despacio: esperá un segundo.' })
+      const terms = parse(initiativeExpr(ch.initiativeMod))
+      const result = evaluate(terms, (sides) => randomInt(1, sides + 1))
+      mutate((d) => {
+        const m = d.maps.find((x) => x.id === map.id)
+        const e = m?.combat.order.find((x) => x.characterId === ch.id)
+        if (!m || !e?.pending) return
+        e.initiative = result.total
+        delete e.pending
+        sortCombat(m, d.party)
+      })
+      addEntry({
+        id: randomBytes(6).toString('hex'),
+        ts: Date.now(),
+        ...author(c),
+        kind: 'roll',
+        vis: 'public',
+        expr: format(terms),
+        label: 'Iniciativa',
+        result,
+      })
+      return
     }
 
     if (msg.t === 'claim') {
@@ -444,8 +522,77 @@ export function createGameServer(dataDir: string) {
         }
         if (next !== null && !(typeof next === 'string' && TUNNEL_URL.test(next))) return json(res, 400, { error: 'Dirección inválida.' })
         tunnelUrl = next as string | null
+        for (const d of dms()) send(d, { t: 'tunnel', url: tunnelUrl })
         console.log(tunnelUrl ? `[mappaneitor] Túnel: ${tunnelUrl}` : '[mappaneitor] Túnel cerrado')
         json(res, 200, { ok: true })
+      })
+      return
+    }
+
+    // Campaña completa en un zip: campaña e imágenes subidas. Las tiradas no se guardan.
+    if (url.pathname === '/api/export' && req.method === 'GET') {
+      if (!isLocalRequest(req)) return json(res, 403, { error: 'Sólo desde la PC del DM.' })
+      if (!campaign) return json(res, 404, { error: 'Todavía no hay campaña.' })
+      const files: Zippable = {
+        'campaign.json': strToU8(JSON.stringify(campaign)),
+      }
+      try {
+        for (const name of readdirSync(uploadsDir)) if (UPLOAD_NAME.test(name)) files[`uploads/${name}`] = [readFileSync(join(uploadsDir, name)), { level: 0 }]
+      } catch (e) {
+        console.error('[mappaneitor] No se pudieron leer las imágenes para exportar:', e)
+      }
+      const zip = zipSync(files, { level: 6 })
+      const stamp = new Date().toISOString().slice(0, 10)
+      res.writeHead(200, {
+        'content-type': 'application/zip',
+        'content-disposition': `attachment; filename="${slug(campaign.name)}-${stamp}.zip"`,
+      })
+      res.end(zip)
+      return
+    }
+
+    if (url.pathname === '/api/import' && req.method === 'POST') {
+      if (!isLocalRequest(req)) return json(res, 403, { error: 'Sólo desde la PC del DM.' })
+      const chunks: Buffer[] = []
+      let size = 0
+      req.on('data', (ch: Buffer) => {
+        size += ch.length
+        if (size > MAX_IMPORT) {
+          json(res, 413, { error: 'El archivo es demasiado grande.' })
+          req.destroy()
+        } else chunks.push(ch)
+      })
+      req.on('end', () => {
+        if (size > MAX_IMPORT) return
+        let entries: Record<string, Uint8Array>
+        let next: Campaign
+        try {
+          entries = unzipSync(new Uint8Array(Buffer.concat(chunks)))
+          const raw = entries['campaign.json']
+          if (!raw) throw new Error('El zip no tiene campaign.json: ¿es una exportación de Mappaneitor?')
+          next = migrateCampaign(JSON.parse(Buffer.from(raw).toString('utf8'))).campaign
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error && e.message.includes('campaign.json') ? e.message : 'No pude leer el zip.' })
+        }
+        try {
+          mkdirSync(uploadsDir, { recursive: true })
+          for (const [path, data] of Object.entries(entries)) {
+            const name = path.startsWith('uploads/') ? path.slice(8) : ''
+            const buf = Buffer.from(data)
+            // Sólo imágenes y hojas en PDF de verdad, con el nombre que les pone el servidor: nada de rutas raras.
+            const ok = name.endsWith('.pdf') ? isPdf(buf) : IMAGE_TYPES.some(([, test]) => test(buf))
+            if (UPLOAD_NAME.test(name) && ok) writeFileSync(join(uploadsDir, name), buf)
+          }
+        } catch (e) {
+          console.error('[mappaneitor] No se pudieron guardar las imágenes importadas:', e)
+          return json(res, 500, { error: 'No se pudieron guardar las imágenes.' })
+        }
+        campaign = next
+        save()
+        for (const d of dms()) send(d, { t: 'welcome', role: 'dm', campaign })
+        dropRevoked()
+        pushViews()
+        json(res, 200, { ok: true, name: campaign.name })
       })
       return
     }
@@ -481,7 +628,76 @@ export function createGameServer(dataDir: string) {
       return
     }
 
-    const up = url.pathname.match(/^\/uploads\/([a-f0-9]{16}\.(png|jpg|gif|webp))$/)
+    // Hoja de personaje en PDF: la sube el jugador para su propio PJ, o el DM para cualquiera.
+    if (url.pathname === '/api/sheet' && req.method === 'POST') {
+      const local = isLocalRequest(req)
+      const seat = local ? undefined : playerByKey(req.headers['x-key'])
+      if (!local && !seat) return json(res, 403, { error: 'Entrá con tu link de invitación antes de subir tu hoja.' })
+      const charId = str(req.headers['x-character'], 40, '')
+      const target = campaign?.party.find((p) => p.id === charId && (local || p.owner === seat!.id))
+      if (!target) return json(res, 403, { error: 'Ese personaje no es tuyo.' })
+      const chunks: Buffer[] = []
+      let size = 0
+      req.on('data', (ch: Buffer) => {
+        size += ch.length
+        if (size > MAX_SHEET) {
+          json(res, 413, { error: 'El PDF supera los 25 MB.' })
+          req.destroy()
+        } else chunks.push(ch)
+      })
+      req.on('end', () => {
+        if (size > MAX_SHEET) return
+        const buf = Buffer.concat(chunks)
+        if (!isPdf(buf)) return json(res, 415, { error: 'Tiene que ser un PDF.' })
+        const name = `${randomBytes(8).toString('hex')}.pdf`
+        try {
+          mkdirSync(uploadsDir, { recursive: true })
+          writeFileSync(join(uploadsDir, name), buf)
+        } catch (e) {
+          console.error('[mappaneitor] No se pudo guardar la hoja:', e)
+          return json(res, 500, { error: 'No se pudo guardar la hoja en el servidor.' })
+        }
+        const sheet = `/uploads/${name}`
+        mutate((d) => {
+          const ch = d.party.find((p) => p.id === charId)
+          if (!ch) return
+          ch.sheet = sheet
+          ch.sheetAt = Date.now()
+        })
+        json(res, 200, { url: sheet })
+      })
+      return
+    }
+
+    // El Manual de monstruos, para la hoja de cada criatura. Sólo el DM: es su libro y tiene spoilers.
+    // Con rangos, el visor de PDF del navegador no espera a los 80 MB para mostrar la página.
+    if (url.pathname === '/api/manual' && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!isLocalRequest(req)) return json(res, 403, { error: 'Sólo desde la PC del DM.' })
+      const path = findManual()
+      if (url.searchParams.has('check')) return json(res, 200, { available: !!path })
+      if (!path) return json(res, 404, { error: 'No encuentro el PDF del Manual de monstruos en la carpeta del proyecto.' })
+      const size = statSync(path).size
+      const head = { 'content-type': 'application/pdf', 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=3600' }
+      const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '')
+      if (range && (range[1] || range[2])) {
+        const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]))
+        const end = range[1] && range[2] ? Math.min(size - 1, Number(range[2])) : size - 1
+        if (start > end || start >= size) {
+          res.writeHead(416, { 'content-range': `bytes */${size}` })
+          return res.end()
+        }
+        res.writeHead(206, { ...head, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 })
+        if (req.method === 'HEAD') return res.end()
+        createReadStream(path, { start, end }).pipe(res)
+        return
+      }
+      res.writeHead(200, { ...head, 'content-length': size })
+      if (req.method === 'HEAD') return res.end()
+      createReadStream(path).pipe(res)
+      return
+    }
+
+    const up = url.pathname.match(/^\/uploads\/([a-f0-9]{16}\.(png|jpg|gif|webp|pdf))$/)
     if (up && req.method === 'GET') {
       const path = join(uploadsDir, up[1])
       if (!existsSync(path)) return json(res, 404, { error: 'No existe.' })

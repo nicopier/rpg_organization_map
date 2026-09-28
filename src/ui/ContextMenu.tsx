@@ -4,7 +4,7 @@ import { effectiveVisibility } from '../model/visibility'
 import type { ContextMenuRequest } from '../render/Scene'
 import { useMap } from '../state/mapStore'
 import { pickTarget } from '../tools/select'
-import { duplicateSelection, fitMap, flipSelection, removeSelection, rotateSelection, toggleHiddenSelection } from './commands'
+import { duplicateSelection, fitMap, flipSelection, removeSelection, rotateSelection, toggleHiddenSelection, toggleHighlightSelection } from './commands'
 import { Icon, type IconName } from './Icon'
 import { NoteEditor } from './NoteEditor'
 import { TOKEN_ASSET } from '../model/types'
@@ -105,6 +105,14 @@ function build(req: ContextMenuRequest, editNote: (id: string) => void): Entry[]
       hidden
         ? { label: 'Revelar a los jugadores', icon: 'eye', key: 'H', run: toggleHiddenSelection, accent: true }
         : { label: 'Ocultar a los jugadores', icon: 'eyeOff', key: 'H', run: toggleHiddenSelection },
+    )
+  }
+  if (sel.type === 'items' && s.viewer === 'dm') {
+    const lit = !!findItem(s.doc, sel.ids[0])?.item.highlight
+    out.push(
+      lit
+        ? { label: 'Dejar de resaltar', icon: 'sparkle', key: 'G', run: toggleHighlightSelection }
+        : { label: 'Resaltar (brilla para todos)', icon: 'sparkle', key: 'G', run: toggleHighlightSelection, accent: true },
     )
   }
   if (sel.type === 'items' && sel.ids.length === 1 && s.viewer === 'dm') {

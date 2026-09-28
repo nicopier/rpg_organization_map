@@ -6,6 +6,7 @@ import { DiceStage } from './dice/DiceStage'
 import { connectDm, replaceCampaign, useNet } from './net/client'
 import { useLog } from './state/logStore'
 import { useMap } from './state/mapStore'
+import { SheetWindow, ShowcaseBar } from './ui/Bestiary'
 import { DicePanel } from './ui/DicePanel'
 import { Icon, type IconName } from './ui/Icon'
 import { InitiativeTracker } from './ui/InitiativeTracker'
@@ -289,6 +290,8 @@ export function App() {
         <RightPanel />
       </main>
       <DiceStage />
+      <ShowcaseBar />
+      <SheetWindow />
       <Toast />
       {dropping && <div className="drop-overlay">Soltá una campaña para abrirla, o un mapa para sumarlo</div>}
     </div>

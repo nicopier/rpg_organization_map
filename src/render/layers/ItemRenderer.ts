@@ -1,4 +1,4 @@
-import { BlurFilter, Container, Graphics, Sprite, Text } from 'pixi.js'
+import { BlurFilter, Container, Graphics, Sprite, Text, Ticker } from 'pixi.js'
 import { TOKEN_ASSET, type Character, type Layer, type Placement } from '../../model/types'
 import { isHiddenFromPlayers } from '../../model/visibility'
 import { hiddenBadge } from '../badges'
@@ -26,14 +26,50 @@ function aura(item: Placement, c: number, color: string): Container {
   return box
 }
 
+const SPOT_GLOW = 0xffc930
+const SPOT_RING = 0xfff4c2
+
+/** Brillo dorado de un objeto resaltado. Late (ver ItemRenderer.pulse) alrededor de su centro. */
+function spotlight(item: Placement, c: number): Container {
+  const w = item.w * c
+  const h = item.h * c
+  const o = c * 0.12
+  const glow = new Graphics()
+    .roundRect(-o, -o, w + o * 2, h + o * 2, c * 0.25)
+    .fill({ color: SPOT_GLOW, alpha: 0.18 })
+    .stroke({ color: SPOT_GLOW, width: c * 0.3, alpha: 0.95 })
+  glow.filters = [new BlurFilter({ strength: c * 0.12, quality: 3 })]
+  const ring = new Graphics().roundRect(-o, -o, w + o * 2, h + o * 2, c * 0.25).stroke({ color: SPOT_RING, width: Math.max(2, c * 0.05) })
+  const box = new Container()
+  box.addChild(glow, ring)
+  box.pivot.set(w / 2, h / 2)
+  box.position.set(w / 2, h / 2)
+  return box
+}
+
 /** Objetos del pack y tokens de personaje. Reconcilia por id y referencia. */
 export class ItemRenderer implements LayerRenderer {
   readonly container = new Container()
   private nodes = new Map<string, Node>()
   private epoch = -1
+  /** Brillos de los objetos resaltados: se animan todos juntos en cada frame. */
+  private pulses = new Set<Container>()
+  private pulse = () => {
+    if (!this.pulses.size) return
+    const k = (Math.sin((performance.now() / 1000) * 4) + 1) / 2
+    for (const p of this.pulses) {
+      if (p.destroyed) {
+        this.pulses.delete(p)
+        continue
+      }
+      p.alpha = 0.45 + 0.55 * k
+      p.scale.set(1 + 0.07 * k)
+    }
+  }
 
   constructor() {
     this.container.sortableChildren = true
+    Ticker.shared.add(this.pulse)
   }
 
   update(layer: Layer, ctx: RenderCtx) {
@@ -97,30 +133,27 @@ export class ItemRenderer implements LayerRenderer {
     }
 
     root.alpha = (item.opacity ?? 1) * (hidden ? HIDDEN_ALPHA : 1)
+    const behind: Container[] = []
     // Objeto con notas del DM: un halo difuso detrás. Los jugadores nunca reciben la nota.
-    if (item.note && ctx.viewer === 'dm') {
-      const wrap = new Container()
-      wrap.position.copyFrom(root.position)
-      root.position.set(0, 0)
-      wrap.addChild(aura(item, c, item.note.color), root)
-      if (hidden) {
-        const badge = hiddenBadge(c)
-        badge.position.set(item.w * c - c * 0.17, c * 0.17)
-        wrap.addChild(badge)
-      }
-      return wrap
+    if (item.note && ctx.viewer === 'dm') behind.push(aura(item, c, item.note.color))
+    if (item.highlight) {
+      const spot = spotlight(item, c)
+      this.pulses.add(spot)
+      behind.push(spot)
     }
+    if (!behind.length && !hidden) return root
+
+    const wrap = new Container()
+    wrap.position.copyFrom(root.position)
+    root.position.set(0, 0)
+    wrap.addChild(...behind, root)
     if (hidden) {
       // El contenedor está atenuado; la marca va aparte para que se lea bien.
-      const wrap = new Container()
-      wrap.position.copyFrom(root.position)
-      root.position.set(0, 0)
       const badge = hiddenBadge(c)
       badge.position.set(item.w * c - c * 0.17, c * 0.17)
-      wrap.addChild(root, badge)
-      return wrap
+      wrap.addChild(badge)
     }
-    return root
+    return wrap
   }
 
   private clear() {
@@ -129,6 +162,7 @@ export class ItemRenderer implements LayerRenderer {
   }
 
   destroy() {
+    Ticker.shared.remove(this.pulse)
     this.clear()
     this.container.destroy({ children: true })
   }

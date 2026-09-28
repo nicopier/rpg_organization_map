@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@3d-dice/dice-box-threejs": "^0.0.12",
+    "fflate": "^0.8.3",
     "idb-keyval": "^6.3.0",
     "immer": "^11.1.18",
     "pixi.js": "^8.21.0",

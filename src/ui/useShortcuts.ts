@@ -10,6 +10,7 @@ import {
   rotateSelection,
   setTool,
   toggleHiddenSelection,
+  toggleHighlightSelection,
   togglePlayerView,
 } from './commands'
 
@@ -80,6 +81,9 @@ export function useShortcuts() {
         case 'h':
         case 'H':
           return s.viewer === 'dm' && toggleHiddenSelection()
+        case 'g':
+        case 'G':
+          return s.role === 'dm' && s.viewer === 'dm' && toggleHighlightSelection()
         case 'p':
         case 'P':
           return togglePlayerView()

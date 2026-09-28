@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import type DiceBox from '@3d-dice/dice-box-threejs'
 import { readPref } from '../App'
 import type { LogEntry } from '../net/protocol'
-import { onLiveEntry } from '../state/logStore'
+import { logActions, onLiveEntry } from '../state/logStore'
 import { useMap } from '../state/mapStore'
 import { natural, type RollResult } from './notation'
 
@@ -105,6 +105,8 @@ export function DiceStage() {
           // Si algo se traba, a los 6 s se sigue igual.
           await Promise.race([box.roll(notation), new Promise((r) => setTimeout(r, 6000))])
         }
+        // Recién ahora el log muestra el resultado, junto con el cartel.
+        logActions.release(e.id)
         setChip(e)
         await new Promise((r) => setTimeout(r, queue.length ? 900 : CHIP_MS))
         box?.clearDice()
@@ -121,8 +123,13 @@ export function DiceStage() {
       if (e.kind !== 'roll' || !e.result || e.hidden) return
       const mine = e.from === myId
       if (!mine && !pref(DICE_PREFS.others)) return
+      // Si se va a animar, el log espera a que los dados frenen.
+      if (pref(DICE_PREFS.on) && animationNotation(e.result)) logActions.hold(e.id)
       queue.push(e)
-      if (queue.length > 2) queue = queue.slice(-2)
+      if (queue.length > 2) {
+        for (const old of queue.slice(0, -2)) logActions.release(old.id)
+        queue = queue.slice(-2)
+      }
       void play()
     })
   }, [])

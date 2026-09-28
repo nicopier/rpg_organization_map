@@ -59,6 +59,13 @@ npm start
 - **Congelar jugadores**: el botón de la barra de arriba bloquea el movimiento de todos. El candado de cada personaje en **Party** bloquea sólo a ese. El jugador ve el aviso y el servidor rechaza sus movimientos.
 - **Party separada**: cada jugador ve el mapa donde está su personaje; en **Party** se ve dónde está cada uno (General › Patio › Cripta).
 
+## Bestiario (Manual de monstruos)
+
+- **Pestaña Bestiario** (en Edición y en Juego): buscá entre las ~445 criaturas del manual y **Colocar** pone el token ya vinculado.
+- **Ver hoja**: abre el PDF en la página de esa criatura, en una ventana que se arrastra y se agranda desde la esquina. En el Inspector de un NPC también está el botón, y ahí se puede vincular cualquier NPC con su criatura.
+- **El PDF**: copialo a la carpeta del proyecto con "monstruo" en el nombre (o poné la ruta en `MAPPA_MANUAL`). Sólo lo ve el DM y no se sube al repo.
+- **Imágenes de referencia**: **Google** abre la búsqueda (por el nombre, o la que escribas). Copiá la dirección de la imagen o la imagen misma y pegala, o arrastrala a la caja. **Mostrar** se la muestra a los jugadores en un cartel; **Ocultar** o **Dejar de mostrar** la saca. Se apagan todas con la casilla de arriba del Bestiario.
+
 ## Dados y chat
 
 - **Panel Dados** (a la izquierda en modo Juego; el DM lo alterna con **Mapas**): clic suma un dado, clic derecho lo saca, más modificador y ventaja/desventaja. En el chat, `/r 1d20+5 Ataque` tira con etiqueta (entiende `2d6+3`, `4d6kh3`, `d%`, `1d20 adv`).

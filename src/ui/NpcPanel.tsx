@@ -19,7 +19,7 @@ const NPC_TEMPLATES: Template[] = [
   { name: 'Ogro', hpMax: 59, ac: 11, speed: 40, initiativeMod: -1, color: '#8e44ad', size: 2 },
 ]
 
-const SIZES = [
+export const SIZES = [
   { value: '1', label: 'Mediano 1×1' },
   { value: '2', label: 'Grande 2×2' },
   { value: '3', label: 'Enorme 3×3' },

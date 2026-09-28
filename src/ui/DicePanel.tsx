@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { readPref, writePref } from '../App'
 import { DICE_PREFS } from '../dice/DiceStage'
 import { natural, splitCommand, type RolledDice } from '../dice/notation'
 import { net } from '../net/bridge'
+import type { Character } from '../model/types'
 import type { LogEntry } from '../net/protocol'
 import { useLog } from '../state/logStore'
 import { useMap } from '../state/mapStore'
@@ -22,7 +23,42 @@ function poolExpr(pool: Pool, mod: number, adv: 'adv' | 'dis' | null): string {
 }
 
 export function roll(expr: string, label?: string, secret = readPref(SECRET_PREF, '0') === '1') {
-  net.send({ t: 'roll', expr, ...(label ? { label } : {}), secret })
+  const as = rollingAs(useMap.getState())?.id
+  net.send({ t: 'roll', expr, ...(label ? { label } : {}), secret, ...(as ? { as } : {}) })
+}
+
+/** DM con un solo NPC seleccionado: sus tiradas quedan firmadas "DM (nombre del NPC)". */
+function rollingAs(s: ReturnType<typeof useMap.getState>): Character | undefined {
+  if (s.role !== 'dm' || s.selection.type !== 'items' || s.selection.ids.length !== 1) return undefined
+  const id = s.selection.ids[0]
+  const item = s.doc.layers.flatMap((l) => l.items ?? []).find((i) => i.id === id)
+  return item?.characterId ? s.doc.characters.find((c) => c.id === item.characterId) : undefined
+}
+
+/** Jugador al que el DM le bloqueó los dados (a todos o a su personaje). El DM nunca. */
+function useDiceLocked() {
+  return useMap((s) => s.role !== 'dm' && (!!s.campaign.diceLocked || s.campaign.party.some((c) => c.owner === s.me && c.diceLocked)))
+}
+
+/** Segundos que le faltan a este jugador para poder volver a tirar (0 = ya puede). */
+function useCooldown(): number {
+  const until = useLog((s) => s.cooldownUntil)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (until <= Date.now()) return
+    const t = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(t)
+  }, [until])
+  return Math.max(0, Math.ceil((until - now) / 1000))
+}
+
+/** Por qué no se puede tirar ahora, o null si se puede. */
+function useRollBlock(): string | null {
+  const locked = useDiceLocked()
+  const wait = useCooldown()
+  if (locked) return 'Dados bloqueados'
+  if (wait > 0) return `Esperá ${wait} s`
+  return null
 }
 
 /** Id con el que firma este cliente: 'dm' o el del jugador. */
@@ -32,6 +68,9 @@ function useMyId() {
 
 export function DicePanel() {
   const isDm = useMap((s) => s.role === 'dm')
+  const locked = useDiceLocked()
+  const block = useRollBlock()
+  const asNpc = useMap((s) => rollingAs(s))
   const [pool, setPool] = useState<Pool>({})
   const [mod, setMod] = useState(0)
   const [adv, setAdv] = useState<'adv' | 'dis' | null>(null)
@@ -60,7 +99,7 @@ export function DicePanel() {
     setAdv(null)
   }
   const doRoll = () => {
-    if (!expr) return
+    if (!expr || block) return
     roll(expr, undefined, secret)
     reset()
   }
@@ -115,10 +154,16 @@ export function DicePanel() {
               <Icon name="x" size={14} />
             </button>
           )}
-          <button className="primary roll-btn" disabled={!expr} onClick={doRoll}>
-            <Icon name="dice" size={16} /> {expr ? `Tirar ${expr}` : 'Elegí dados'}
+          <button className="primary roll-btn" disabled={!expr || !!block} onClick={doRoll} title={locked ? 'El DM bloqueó las tiradas' : undefined}>
+            <Icon name={locked ? 'lock' : 'dice'} size={16} /> {block ?? (expr ? `Tirar ${expr}` : 'Elegí dados')}
           </button>
         </div>
+        {asNpc && (
+          <div className="rolling-as" title="Tenés este NPC seleccionado: tus tiradas quedan a su nombre. Deseleccioná para tirar como DM.">
+            <span className="dot" style={{ background: asNpc.color }} />
+            Tirás como <strong>DM ({asNpc.name})</strong>
+          </div>
+        )}
         <details className="dice-settings">
           <summary>Opciones</summary>
           <div className="dice-options-row">
@@ -127,96 +172,103 @@ export function DicePanel() {
           </div>
         </details>
       </div>
-      <RollLog />
       <ChatBox secret={secret} />
+      <RollLog />
     </div>
   )
 }
 
+/** Lo más nuevo arriba. */
 function RollLog() {
   const entries = useLog((s) => s.entries)
-  const listRef = useRef<HTMLOListElement>(null)
-  const stick = useRef(true)
-
-  useLayoutEffect(() => {
-    const el = listRef.current
-    if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [entries])
-
+  const myId = useMyId()
+  const block = useRollBlock()
+  const rolling = useLog((s) => s.rolling)
   return (
-    <ol
-      className="roll-log"
-      ref={listRef}
-      onScroll={(e) => {
-        const el = e.currentTarget
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-      }}
-    >
-      {entries.length === 0 && <li className="hint empty">Todavía no hay tiradas. Elegí dados arriba o escribí /r 1d20+3 abajo.</li>}
-      {entries.map((e) => (
-        <Entry key={e.id} e={e} />
-      ))}
+    <ol className="roll-log">
+      {entries.length === 0 && <li className="hint empty">Todavía no hay tiradas. Elegí dados arriba o escribí /r 1d20+3 en el chat.</li>}
+      {entries
+        .slice()
+        .reverse()
+        .map((e) => (
+          <Entry key={e.id} e={e} myId={myId} block={block} rolling={!!rolling[e.id]} />
+        ))}
     </ol>
   )
 }
 
 const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
-function Entry({ e }: { e: LogEntry }) {
-  const myId = useMyId()
+/** Una línea por entrada: quién y qué a la izquierda, el total a la derecha. La hora queda en el tooltip. */
+function Entry({ e, myId, block, rolling }: { e: LogEntry; myId: string | null; block: string | null; rolling: boolean }) {
   const mine = e.from === myId
-  const head = (
-    <div className="log-head">
+  const who = (
+    <>
       <span className="dot" style={{ background: e.color }} />
       <strong className="name">{e.name}</strong>
       {e.vis === 'whisper' && <span className="to">→ {e.to === myId ? 'vos' : e.toName}</span>}
-      {e.label && <span className="label">· {e.label}</span>}
-      {e.vis === 'secret' && !e.hidden && (
-        <span className="badge secret" title="Tirada secreta">
-          <Icon name="eyeOff" size={12} /> secreta
-        </span>
-      )}
-      <time>{time(e.ts)}</time>
-    </div>
+    </>
   )
 
   if (e.hidden)
     return (
-      <li className="log-item muted">
-        {head}
-        <p className="log-text">
-          <Icon name="dice" size={14} /> tiró dados en secreto
-        </p>
+      <li className="log-item muted" title={time(e.ts)}>
+        <div className="log-line">
+          {who}
+          <span className="log-text">tiró en secreto</span>
+        </div>
       </li>
     )
 
   if (e.kind === 'chat')
     return (
-      <li className={`log-item chat${e.vis === 'whisper' ? ' whisper' : ''}${mine ? ' mine' : ''}`}>
-        {head}
-        <p className="log-text">{e.text}</p>
+      <li className={`log-item chat${e.vis === 'whisper' ? ' whisper' : ''}${mine ? ' mine' : ''}`} title={time(e.ts)}>
+        <div className="log-line">
+          {who}
+          <span className="log-text">{e.text}</span>
+        </div>
+      </li>
+    )
+
+  // Los dados 3D todavía ruedan: el resultado aparece cuando frenan.
+  if (rolling)
+    return (
+      <li className="log-item muted rolling" title={time(e.ts)}>
+        <div className="log-line">
+          {who}
+          <span className="log-text">
+            <Icon name="dice" size={12} /> está tirando{e.label ? ` ${e.label}` : ''}…
+          </span>
+        </div>
       </li>
     )
 
   const r = e.result!
   const nat = natural(r)
   return (
-    <li className={`log-item roll${mine ? ' mine' : ''}`}>
-      {head}
-      <div className="roll-body">
-        <div className="breakdown">
-          <span className="expr">{e.expr}</span>
-          <span className="values">
-            {r.dice.map((d, i) => (
-              <DiceValues key={i} d={d} first={i === 0} />
-            ))}
-            {r.mod !== 0 && <span className="mod">{r.mod > 0 ? `+ ${r.mod}` : `− ${-r.mod}`}</span>}
-          </span>
+    <li className={`log-item roll${Date.now() - e.ts < 8000 ? ' revealed' : ''}${mine ? ' mine' : ''}`} title={time(e.ts)}>
+      <div className="log-main">
+        <div className="log-line">
+          {who}
+          {e.label && <span className="label">{e.label}</span>}
+          {e.vis === 'secret' && <Icon name="eyeOff" size={12} className="secret-mark" />}
         </div>
-        <button className={`total${nat === 20 ? ' crit' : nat === 1 ? ' fumble' : ''}`} onClick={() => roll(e.expr!, e.label)} title={`Tirar de nuevo ${e.expr}`}>
-          {r.total}
-        </button>
+        <div className="values">
+          <span className="expr">{e.expr}</span>
+          {r.dice.map((d, i) => (
+            <DiceValues key={i} d={d} first={i === 0} />
+          ))}
+          {r.mod !== 0 && <span className="mod">{r.mod > 0 ? `+${r.mod}` : `−${-r.mod}`}</span>}
+        </div>
       </div>
+      <button
+        className={`total${nat === 20 ? ' crit' : nat === 1 ? ' fumble' : ''}`}
+        disabled={!!block}
+        onClick={() => roll(e.expr!, e.label)}
+        title={block ?? `Tirar de nuevo ${e.expr}`}
+      >
+        {r.total}
+      </button>
     </li>
   )
 }
@@ -237,6 +289,7 @@ function DiceValues({ d, first }: { d: RolledDice; first: boolean }) {
 /** Mensajes al log. "/r 1d20+5 Ataque" tira; el selector elige si es para todos o un susurro. */
 function ChatBox({ secret }: { secret: boolean }) {
   const isDm = useMap((s) => s.role === 'dm')
+  const block = useRollBlock()
   const me = useMap((s) => s.me)
   const players = useMap((s) => s.campaign.players)
   const party = useMap((s) => s.campaign.party)
@@ -262,6 +315,7 @@ function ChatBox({ secret }: { secret: boolean }) {
     if (cmd) {
       const { expr, label } = splitCommand(cmd[2])
       if (!expr) return useMap.getState().toast('Después de /r va la tirada, por ejemplo /r 1d20+5 Ataque')
+      if (block) return useMap.getState().toast(block === 'Dados bloqueados' ? 'El DM bloqueó las tiradas por ahora.' : `${block} para volver a tirar.`)
       roll(expr, label, secret)
     } else {
       net.send({ t: 'chat', text: t, ...(target ? { to: target } : {}) })

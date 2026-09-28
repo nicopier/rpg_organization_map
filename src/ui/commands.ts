@@ -1,7 +1,7 @@
 import { canMove } from '../model/queries'
 import type { Rotation } from '../model/types'
 import { currentScene } from '../render/Scene'
-import { deleteSelection, duplicateItems, flipItems, resizeItems, rotateItems, setPositions, toggleHiddenSelection } from '../state/actions'
+import { deleteSelection, duplicateItems, flipItems, resizeItems, rotateItems, setPositions, toggleHiddenSelection, toggleHighlightSelection } from '../state/actions'
 import { useMap, type Tool } from '../state/mapStore'
 import { refreshGhost } from '../tools/placeItem'
 
@@ -102,7 +102,7 @@ export function togglePlayerView() {
   s.setUi({ viewer, tool, selection: viewer === 'player' ? { type: 'none' } : s.selection })
 }
 
-export { toggleHiddenSelection }
+export { toggleHiddenSelection, toggleHighlightSelection }
 
 export function fitMap() {
   currentScene?.fitToMap()

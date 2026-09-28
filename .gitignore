@@ -2,3 +2,6 @@ node_modules
 dist
 *.tsbuildinfo
 data
+
+# PDFs de referencia (el Manual de monstruos): son del DM, no van al repo
+*.pdf

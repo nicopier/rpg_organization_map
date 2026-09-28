@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNet } from '../net/client'
-import { renameMap, setMovementLocked } from '../state/actions'
+import { renameMap, setDiceLocked, setMovementLocked } from '../state/actions'
 import { useMap, type Tool } from '../state/mapStore'
 import { fitMap, setTool, togglePlayerView } from './commands'
 import { FileDialog, GridSettings, InviteDialog } from './dialogs'
@@ -40,9 +40,13 @@ export function Toolbar() {
   const canRedo = useMap((s) => s.future.length > 0)
   const net = useNet((s) => s.status)
   const online = useNet((s) => s.online.length)
+  // Túnel nuevo (otro día, otra dirección) y los jugadores que ya entraron alguna vez todavía tienen el link viejo.
+  const seated = useMap((s) => s.campaign.players.some((p) => p.name))
+  const staleLinks = useNet((s) => !!s.tunnel && s.tunnel !== s.sharedTunnel) && seated
   const [dialog, setDialog] = useState<Dialog>(null)
   const tools = mode === 'edit' ? EDIT_TOOLS : PLAY_TOOLS
   const frozen = useMap((s) => !!s.campaign.movementLocked)
+  const diceLocked = useMap((s) => !!s.campaign.diceLocked)
 
   return (
     <header className="toolbar">
@@ -91,6 +95,16 @@ export function Toolbar() {
           <Icon name={frozen ? 'lock' : 'unlock'} size={15} /> {frozen ? 'Jugadores congelados' : 'Congelar jugadores'}
         </button>
       )}
+      {mode === 'play' && (
+        <button
+          className={`pill freeze${diceLocked ? ' on' : ''}`}
+          onClick={() => setDiceLocked(!diceLocked)}
+          aria-pressed={diceLocked}
+          title={diceLocked ? 'Los jugadores no pueden tirar dados. Clic para liberarlos.' : 'Bloquear las tiradas de dados de todos los jugadores'}
+        >
+          <Icon name={diceLocked ? 'lock' : 'dice'} size={15} /> {diceLocked ? 'Dados bloqueados' : 'Bloquear dados'}
+        </button>
+      )}
 
       <div className="spacer" />
 
@@ -98,6 +112,16 @@ export function Toolbar() {
         <Icon name={viewer === 'player' ? 'eye' : 'dm'} size={15} />
         {viewer === 'player' ? 'Vista jugador' : 'Vista DM'}
       </button>
+
+      {staleLinks && (
+        <button
+          className="pill relink"
+          onClick={() => setDialog('invite')}
+          title="El túnel tiene una dirección nueva: los links que tienen los jugadores ya no andan. Mandales los nuevos."
+        >
+          <Icon name="rotate" size={15} /> Reenviar links
+        </button>
+      )}
 
       <button className="pill invite" onClick={() => setDialog('invite')} title="Link para que entren los jugadores">
         <Icon name="token" size={15} /> Invitar

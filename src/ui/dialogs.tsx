@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { exportCampaign, readJsonFile } from '../io/serialize'
 import { importMapInto, migrateCampaign } from '../model/mapDoc'
 import { readPref, writePref } from '../App'
-import { inviteUrl, replaceCampaign, useNet } from '../net/client'
+import { importCampaignZip, inviteUrl, markLinksShared, replaceCampaign, useNet } from '../net/client'
 import { addInvites, regenerateInvite, removePlayer, renameMap, updateGrid } from '../state/actions'
 import { useMap } from '../state/mapStore'
 import { CommitNumber, CommitText, groupWhileDragging, groupWhileFocused } from './fields'
@@ -139,16 +139,30 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
   const link = (key?: string) => (key && validOrigin ? inviteUrl(origin, key) : '')
   const seatName = (name: string, i: number) => name || `Invitación ${i + 1}`
 
+  const shared = () => chosen === TUNNEL && tunnel && markLinksShared(tunnel)
   const copy = async (text: string, id: string) => {
     try {
       await navigator.clipboard.writeText(text)
+      shared()
       setCopied(id)
       setTimeout(() => setCopied((c) => (c === id ? null : c)), 1500)
     } catch {
       setCopied(null)
     }
   }
-  const allLinks = players.map((p, i) => `${seatName(p.name, i)}: ${link(p.key)}`).join('\n')
+  const who = (p: (typeof players)[number], i: number) => {
+    const chars = party.filter((c) => c.owner === p.id).map((c) => c.name)
+    return chars.length ? `${chars.join(', ')} (${seatName(p.name, i)})` : seatName(p.name, i)
+  }
+  const allLinks = [
+    'Links para entrar a la partida (los de la vez pasada ya no andan):',
+    ...players.map((p, i) => `• ${who(p, i)}: ${link(p.key)}`),
+  ].join('\n')
+  const whatsapp = (text: string) => {
+    shared()
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener')
+  }
+  const staleLinks = useNet((s) => !!s.tunnel && s.tunnel !== s.sharedTunnel) && chosen === TUNNEL
 
   return (
     <Modal title="Invitar jugadores" onClose={onClose} wide>
@@ -213,11 +227,22 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
           </button>
           <div className="spacer" />
           {players.length > 0 && validOrigin && (
-            <button onClick={() => copy(allLinks, '@all')}>
-              <Icon name="copy" size={15} /> {copied === '@all' ? 'Copiados' : 'Copiar todos'}
-            </button>
+            <>
+              <button onClick={() => copy(allLinks, '@all')} title="Un mensaje con el link de cada uno, para pegar en el grupo">
+                <Icon name="copy" size={15} /> {copied === '@all' ? 'Copiado' : 'Copiar mensaje para el grupo'}
+              </button>
+              <button onClick={() => whatsapp(allLinks)} title="Abrir WhatsApp con el mensaje listo">
+                WhatsApp
+              </button>
+            </>
           )}
         </div>
+        {staleLinks && players.some((p) => p.name) && (
+          <p className="relink-note">
+            <Icon name="rotate" size={14} /> El túnel cambió de dirección: los links que tienen los jugadores ya no andan. Cada link sigue siendo la
+            misma silla, con su personaje; sólo cambió la dirección. Mandales el mensaje de arriba.
+          </p>
+        )}
 
         {players.length ? (
           <ul className="seats">
@@ -235,6 +260,14 @@ export function InviteDialog({ onClose }: { onClose: () => void }) {
                   <code title={url}>{url || 'Elegí una dirección'}</code>
                   <button className="small-btn" disabled={!url} onClick={() => copy(url, p.id)}>
                     {copied === p.id ? 'Copiado' : 'Copiar'}
+                  </button>
+                  <button
+                    className="small-btn"
+                    disabled={!url}
+                    title="Mandárselo por WhatsApp"
+                    onClick={() => whatsapp(`${who(p, i)}, tu link para entrar a la partida: ${url}`)}
+                  >
+                    WA
                   </button>
                   <button
                     className="icon-btn"
@@ -277,6 +310,17 @@ export function FileDialog({ onClose }: { onClose: () => void }) {
 
   const openCampaign = async (f: File | undefined) => {
     if (!f) return
+    if (/\.zip$/i.test(f.name)) {
+      if (!confirm(`¿Reemplazar la campaña actual por la de "${f.name}"? Exportá antes la actual si la querés conservar.`)) return
+      try {
+        const name = await importCampaignZip(f)
+        useMap.getState().toast(`Importada "${name}", con sus imágenes`)
+        onClose()
+      } catch (e) {
+        setError((e as Error).message)
+      }
+      return
+    }
     try {
       const { campaign, notes } = migrateCampaign(await readJsonFile(f))
       if (!confirm(`¿Reemplazar la campaña actual por "${campaign.name}"? Guardá antes la actual si la querés conservar.`)) return
@@ -310,18 +354,22 @@ export function FileDialog({ onClose }: { onClose: () => void }) {
     <Modal title="Campaña" onClose={onClose}>
       <div className="form">
         <p className="hint lead">
-          La campaña se guarda sola en esta PC (carpeta <code>data/</code>). Descargala para tener una copia o pasarla a otra compu.
+          La campaña se guarda sola en esta PC (carpeta <code>data/</code>). Exportala para tener una copia o seguirla en otra compu: el zip lleva
+          mapas, personajes, invitaciones e imágenes subidas.
         </p>
-        <button className="primary" onClick={() => exportCampaign(useMap.getState().campaign)}>
-          <Icon name="download" size={16} /> Descargar campaña (.campana.json)
+        <button className="primary" onClick={() => (location.href = '/api/export')}>
+          <Icon name="download" size={16} /> Exportar campaña (.zip)
         </button>
         <button onClick={() => openInput.current?.click()}>
-          <Icon name="folder" size={16} /> Abrir una campaña guardada
+          <Icon name="folder" size={16} /> Importar campaña (.zip o .campana.json)
+        </button>
+        <button className="link" onClick={() => exportCampaign(useMap.getState().campaign)}>
+          Descargar sólo la campaña (.campana.json, sin imágenes)
         </button>
         <button onClick={() => mapInput.current?.click()}>
           <Icon name="upload" size={16} /> Sumar un mapa suelto (.mappa.json)
         </button>
-        <input ref={openInput} type="file" accept=".json,application/json" hidden onChange={(e) => openCampaign(e.target.files?.[0])} />
+        <input ref={openInput} type="file" accept=".zip,.json,application/zip,application/json" hidden onChange={(e) => openCampaign(e.target.files?.[0])} />
         <input ref={mapInput} type="file" accept=".json,application/json" hidden onChange={(e) => importMap(e.target.files?.[0])} />
         {error && <p className="error">{error}</p>}
       </div>

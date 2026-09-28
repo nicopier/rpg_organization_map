@@ -79,6 +79,8 @@ export type Placement = {
   permission?: Permission
   visibility?: Visibility
   note?: DmNote
+  /** El DM lo resalta: brilla y late para que todos lo vean. */
+  highlight?: boolean
 }
 
 export type Layer = {
@@ -118,9 +120,22 @@ export type Character = {
   image?: string
   /** El DM le congeló el movimiento a este personaje. */
   moveLocked?: boolean
+  /** El DM le bloqueó las tiradas de dados a este personaje. */
+  diceLocked?: boolean
+  /** NPC: criatura del Manual de monstruos (id de MONSTERS). Nunca llega a los jugadores. */
+  monster?: string
+  /** PJ: hoja de personaje en PDF que sube el jugador (URL servida por el servidor). Sólo la ven su dueño y el DM. */
+  sheet?: string
+  /** Cuándo se subió la última versión de la hoja. */
+  sheetAt?: number
 }
 
-export type CombatEntry = { characterId: string; initiative: number }
+export type CombatEntry = {
+  characterId: string
+  initiative: number
+  /** Personaje de un jugador que todavía no tiró su iniciativa: le aparece el cartel para tirarla. */
+  pending?: boolean
+}
 
 export type Combat = {
   active: boolean
@@ -178,6 +193,28 @@ export type Campaign = {
   activeMapId: string | null
   /** El DM congeló el movimiento de todos los jugadores. */
   movementLocked?: boolean
+  /** El DM bloqueó las tiradas de dados de todos los jugadores. */
+  diceLocked?: boolean
+  /** El DM tira la iniciativa de todos; si no, cada jugador tira la de su personaje. */
+  dmRollsInitiative?: boolean
+  /**
+   * Imágenes de referencia (links de internet o subidas), por clave: "mm:<id del monstruo>"
+   * para las criaturas del manual, "npc:<id del personaje>" para un NPC propio. Sólo del DM.
+   */
+  refImages?: Record<string, string[]>
+  /** Búsqueda propia para Google Imágenes, por la misma clave. Sin ella se busca por el nombre. */
+  refQueries?: Record<string, string>
+  /** El DM apagó las imágenes de referencia: no se ven ni se muestran a los jugadores. */
+  refImagesOff?: boolean
+  /** Imagen que el DM les está mostrando a los jugadores ahora (les aparece en un cartel). */
+  showcase?: Showcase
+}
+
+export type Showcase = {
+  /** Cambia cada vez que el DM muestra algo: el jugador que cerró el cartel lo vuelve a ver. */
+  id: string
+  url: string
+  title?: string
 }
 
 export const TOKEN_ASSET = '@token'

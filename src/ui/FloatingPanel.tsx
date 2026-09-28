@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMap, type Tool } from '../state/mapStore'
 import { AssetPalette } from './AssetPalette'
+import { BestiaryPanel } from './Bestiary'
 import { Icon, type IconName } from './Icon'
 import { NpcPanel } from './NpcPanel'
 import { FogPanel, MarksPanel, PartyPanel } from './PlayPanels'
@@ -13,12 +14,14 @@ const EDIT_TABS: Tab[] = [
   { id: 'floor', label: 'Piso', icon: 'brush', tools: ['paint'], render: () => <AssetPalette categories={['floor']} /> },
   { id: 'objects', label: 'Objetos', icon: 'box', tools: ['place'], render: () => <AssetPalette categories={['structure', 'prop', 'effect', 'marker']} /> },
   { id: 'npc', label: 'NPC', icon: 'token', tools: ['token'], render: () => <NpcPanel /> },
+  { id: 'bestiary', label: 'Bestiario', icon: 'book', tools: ['token'], render: () => <BestiaryPanel /> },
 ]
 
 const PLAY_TABS: Tab[] = [
   { id: 'party', label: 'Party', icon: 'token', tools: ['partyDrop', 'token'], render: () => <PartyPanel /> },
   { id: 'fog', label: 'Niebla', icon: 'eyeOff', tools: ['fog'], render: () => <FogPanel /> },
   { id: 'marks', label: 'Marcas', icon: 'dm', tools: ['place'], render: () => <MarksPanel /> },
+  { id: 'bestiary', label: 'Bestiario', icon: 'book', tools: ['token'], render: () => <BestiaryPanel /> },
 ]
 
 function readPref(key: string, fallback: string) {
@@ -50,8 +53,10 @@ export function FloatingPanel() {
 
   // Al cambiar de modo, la pestaña recordada de ese modo.
   useEffect(() => setTab(readPref(`mappaneitor:float:${mode}`, (mode === 'edit' ? EDIT_TABS : PLAY_TABS)[0].id)), [mode])
-  // Elegir una herramienta desde la barra lleva a su pestaña.
+  // Elegir una herramienta desde la barra lleva a su pestaña, salvo que la actual ya la use
+  // (colocar una criatura desde el Bestiario no salta a la pestaña NPC).
   useEffect(() => {
+    if (tabs.find((x) => x.id === tab)?.tools.includes(tool)) return
     const t = tabs.find((x) => x.tools.includes(tool))
     if (t) setTab(t.id)
   }, [tool, tabs])

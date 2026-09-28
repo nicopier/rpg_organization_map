@@ -7,10 +7,10 @@ import { isVisibleTo } from './visibility'
 export const NO_MAP = '@none'
 
 /**
- * Una ficha ajena tal como la ve un jugador: nombre, color e imagen, sin números ni estados.
+ * Una ficha ajena tal como la ve un jugador: nombre, color e imagen, sin números, estados ni hoja en PDF.
  * Sólo queda si está caído (hp.cur 0); hp.max 0 le dice al cliente que la vida es desconocida.
  */
-function withoutStats(c: Character): Character {
+function withoutStats({ monster: _m, sheet: _s, sheetAt: _sa, ...c }: Character): Character {
   return { ...c, hp: { cur: c.hp.cur <= 0 ? 0 : 1, max: 0, temp: 0 }, ac: 0, speed: 0, initiativeMod: 0, conditions: [], notes: '' }
 }
 
@@ -78,8 +78,11 @@ export function projectForPlayer(c: Campaign, playerId: string | null): Campaign
   const own = mine.map((p) => mapOfCharacter(c, p.id)).find(Boolean)
   const active = own ?? c.maps.find((m) => m.id === c.activeMapId)
   const map = active ? filterMap(active, partyIds) : { ...createEmptyMap(''), id: NO_MAP }
+  // Las referencias son del DM; al jugador sólo le llega la imagen que le están mostrando.
+  const { refImages: _ri, refQueries: _rq, refImagesOff, showcase, ...rest } = c
   return {
-    ...c,
+    ...rest,
+    ...(showcase && !refImagesOff ? { showcase } : {}),
     zones: [],
     maps: [map],
     party: c.party.map((p) => (p.owner === playerId ? p : withoutStats(p))),

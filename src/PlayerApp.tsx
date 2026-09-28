@@ -5,6 +5,7 @@ import { layerOfKind, PLAYER_COLORS } from './model/mapDoc'
 import { net } from './net/bridge'
 import { connectPlayer, useNet } from './net/client'
 import { useMap } from './state/mapStore'
+import { ShowcasePopup } from './ui/Bestiary'
 import { DicePanel } from './ui/DicePanel'
 import { ColorSwatches } from './ui/fields'
 import { Icon } from './ui/Icon'
@@ -216,6 +217,12 @@ export function PlayerApp() {
   const myName = useMap((s) => s.campaign.players.find((p) => p.id === s.me)?.name)
   const named = !!myName
   const frozen = useMap((s) => !!s.campaign.movementLocked || s.campaign.party.some((c) => c.owner === s.me && c.moveLocked))
+  const initFor = useMap((s) => {
+    const c = s.doc.combat
+    if (!c.active) return undefined
+    return s.campaign.party.find((p) => p.owner === s.me && c.order.some((e) => e.characterId === p.id && e.pending))
+  })
+  const diceLocked = useMap((s) => !!s.campaign.diceLocked || s.campaign.party.some((c) => c.owner === s.me && c.diceLocked))
   const narrow = useNarrow()
   useShortcuts()
 
@@ -268,17 +275,36 @@ export function PlayerApp() {
         <div className="canvas-col">
           <MapCanvas />
           {noTable && <div className="waiting">Esperando que el DM lleve la party a un mapa…</div>}
-          {frozen && !noTable && (
+          {initFor && !noTable && (
+            <div className="init-prompt" role="alert">
+              <strong>¡Tirá iniciativa!</strong>
+              <span>
+                {initFor.name}: 1d20{initFor.initiativeMod ? (initFor.initiativeMod > 0 ? `+${initFor.initiativeMod}` : initFor.initiativeMod) : ''}
+              </span>
+              <button className="primary" onClick={() => net.send({ t: 'initiative', characterId: initFor.id })}>
+                <Icon name="dice" size={16} /> Tirar
+              </button>
+            </div>
+          )}
+          {(frozen || diceLocked) && !noTable && (
             <div className="banners">
-              <div className="banner frozen">
-                <Icon name="lock" size={14} /> El DM pausó el movimiento
-              </div>
+              {frozen && (
+                <div className="banner frozen">
+                  <Icon name="lock" size={14} /> El DM pausó el movimiento
+                </div>
+              )}
+              {diceLocked && (
+                <div className="banner frozen">
+                  <Icon name="lock" size={14} /> El DM bloqueó los dados
+                </div>
+              )}
             </div>
           )}
         </div>
         {narrow ? <BottomTabs /> : <PlayerSide />}
       </main>
       <DiceStage />
+      <ShowcasePopup />
       <Toast />
     </div>
   )

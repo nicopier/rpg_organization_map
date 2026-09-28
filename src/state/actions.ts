@@ -5,10 +5,12 @@ import { newId, newKey } from '../model/ids'
 import { isInside, type NodeKind } from '../model/tree'
 import { cellKey, createEmptyMap, layerOfKind, makePlayer } from '../model/mapDoc'
 import { findLayer } from '../model/queries'
+import { isPlayerOwned, sortCombat } from '../model/combat'
 import {
   TOKEN_ASSET,
   type Campaign,
   type Character,
+  type CombatEntry,
   type DungeonStyle,
   type FloorCell,
   type Grid,
@@ -377,6 +379,29 @@ export function toggleHiddenSelection() {
   }
 }
 
+/* ---------- Resaltar ---------- */
+
+export function setItemsHighlight(ids: string[], on: boolean) {
+  change((d) => {
+    for (const id of ids) {
+      const f = findDraftItem(d, id)
+      if (!f) continue
+      if (on) f.item.highlight = true
+      else delete f.item.highlight
+    }
+  })
+}
+
+/** Resalta lo seleccionado, o le saca el brillo si el primero ya lo tenía. */
+export function toggleHighlightSelection() {
+  const { selection, doc } = S()
+  if (selection.type !== 'items' || !selection.ids.length) return
+  const first = doc.layers.flatMap((l) => l.items ?? []).find((i) => i.id === selection.ids[0])
+  const on = !first?.highlight
+  setItemsHighlight(selection.ids, on)
+  S().toast(on ? 'Resaltado: brilla para todos' : 'Ya no brilla')
+}
+
 /* ---------- Personajes ---------- */
 
 function newCharacter(d: TokenDraft, name: string): Character {
@@ -393,6 +418,7 @@ function newCharacter(d: TokenDraft, name: string): Character {
     notes: '',
     color: d.color,
     ...(d.image ? { image: d.image } : {}),
+    ...(d.monster && d.kind === 'npc' ? { monster: d.monster } : {}),
   }
 }
 
@@ -443,18 +469,117 @@ export function updateCharacter(id: string, recipe: (c: Draft<Character>) => voi
 }
 
 /** amount < 0 es daño (absorbe primero el HP temporal), amount > 0 es curación hasta el máximo. */
+function hpDelta(c: Draft<Character>, amount: number) {
+  if (amount < 0) {
+    let dmg = -amount
+    const fromTemp = Math.min(c.hp.temp, dmg)
+    c.hp.temp -= fromTemp
+    dmg -= fromTemp
+    c.hp.cur = Math.max(0, c.hp.cur - dmg)
+  } else {
+    c.hp.cur = Math.min(c.hp.max, c.hp.cur + amount)
+  }
+}
+
 export function applyHp(id: string, amount: number) {
-  updateCharacter(id, (c) => {
-    if (amount < 0) {
-      let dmg = -amount
-      const fromTemp = Math.min(c.hp.temp, dmg)
-      c.hp.temp -= fromTemp
-      dmg -= fromTemp
-      c.hp.cur = Math.max(0, c.hp.cur - dmg)
-    } else {
-      c.hp.cur = Math.min(c.hp.max, c.hp.cur + amount)
+  updateCharacter(id, (c) => hpDelta(c, amount))
+}
+
+/* ---------- Varios NPC a la vez (una sola entrada de deshacer) ---------- */
+
+/** Edita las fichas de varios NPC del mapa abierto. Sólo el DM. */
+export function updateCharacters(ids: string[], recipe: (c: Draft<Character>) => void) {
+  const set = new Set(ids)
+  changeMap((m) => {
+    for (const ch of m.characters) if (set.has(ch.id)) recipe(ch)
+  })
+}
+
+/** Daño o curación a todos (una bola de fuego). */
+export function applyHpMany(ids: string[], amount: number) {
+  updateCharacters(ids, (c) => hpDelta(c, amount))
+}
+
+/** Cambia el HP máximo; los que estaban enteros quedan enteros con el nuevo máximo. */
+export function setHpMaxMany(ids: string[], max: number) {
+  updateCharacters(ids, (c) => {
+    c.hp.cur = c.hp.cur >= c.hp.max ? max : Math.min(c.hp.cur, max)
+    c.hp.max = max
+  })
+}
+
+/** Los renombra "Goblin", "Goblin 2", "Goblin 3"… sin chocar con otros NPC del mapa. */
+export function renameMany(ids: string[], name: string) {
+  const set = new Set(ids)
+  changeMap((m) => {
+    const taken = m.characters.filter((c) => !set.has(c.id)).map((c) => ({ name: c.name }))
+    for (const id of ids) {
+      const ch = m.characters.find((c) => c.id === id)
+      if (!ch) continue
+      ch.name = uniqueName(taken, name.trim() || ch.name)
+      taken.push({ name: ch.name })
     }
   })
+}
+
+/**
+ * Manda NPCs (tokens de la capa NPC) del mapa abierto a otro: la ficha viaja con el token, sale del
+ * combate de este mapa y queda en la misma posición (ajustada si el otro mapa es más chico).
+ * Si el nombre choca con uno de allá, se renumera. Devuelve cuántos se mandaron.
+ */
+export function sendNpcsToMap(itemIds: string[], targetMapId: string): number {
+  const fromId = S().mapId
+  if (targetMapId === fromId) return 0
+  const set = new Set(itemIds)
+  let moved = 0
+  changeCampaign((c) => {
+    const from = c.maps.find((m) => m.id === fromId)
+    const to = c.maps.find((m) => m.id === targetMapId)
+    if (!from || !to) return
+    const src = layerOfKind(from, 'npc')
+    const dst = layerOfKind(to, 'npc')
+    const gone = new Set<string>()
+    for (const it of (src.items ?? []).filter((i) => set.has(i.id) && i.characterId)) {
+      const ch = from.characters.find((x) => x.id === it.characterId)
+      if (!ch) continue
+      src.items = src.items!.filter((i) => i.id !== it.id)
+      // Si el mismo NPC tenía otro token acá (raro), la ficha se queda.
+      if (!src.items.some((i) => i.characterId === ch.id)) {
+        from.characters = from.characters.filter((x) => x.id !== ch.id)
+        gone.add(ch.id)
+      }
+      const copy = JSON.parse(JSON.stringify(ch)) as Character
+      if (!gone.has(ch.id)) copy.id = newId('C')
+      copy.name = uniqueName(to.characters, ch.name)
+      to.characters.push(copy)
+      const w = Math.min(it.w, to.grid.cols)
+      const h = Math.min(it.h, to.grid.rows)
+      ;(dst.items ??= []).push({
+        ...JSON.parse(JSON.stringify(it)),
+        characterId: copy.id,
+        w,
+        h,
+        x: Math.max(0, Math.min(it.x, to.grid.cols - w)),
+        y: Math.max(0, Math.min(it.y, to.grid.rows - h)),
+      })
+      moved++
+    }
+    removeFromOrder(from, gone)
+  })
+  if (moved) S().setUi({ selection: { type: 'none' } })
+  return moved
+}
+
+/** Selecciona en el mapa todos los NPC iguales a este: misma criatura del manual, o mismo nombre sin el número. */
+export function selectSimilarNpcs(characterId: string) {
+  const { doc } = S()
+  const ref = doc.characters.find((c) => c.id === characterId)
+  if (!ref) return
+  const same = (c: Character) => (ref.monster ? c.monster === ref.monster : !c.monster && baseName(c.name) === baseName(ref.name))
+  const chars = new Set(doc.characters.filter(same).map((c) => c.id))
+  const ids = doc.layers.flatMap((l) => (l.kind === 'npc' ? (l.items ?? []).filter((i) => i.characterId && chars.has(i.characterId)).map((i) => i.id) : []))
+  S().setUi({ selection: { type: 'items', ids } })
+  S().toast(`${ids.length} seleccionados`)
 }
 
 /* ---------- Party y jugadores ---------- */
@@ -568,6 +693,24 @@ export function setCharacterLocked(id: string, locked: boolean) {
     if (!ch) return
     if (locked) ch.moveLocked = true
     else delete ch.moveLocked
+  })
+}
+
+/** Bloquea (o libera) las tiradas de dados de todos los jugadores. */
+export function setDiceLocked(locked: boolean) {
+  changeCampaign((c) => {
+    if (locked) c.diceLocked = true
+    else delete c.diceLocked
+  })
+}
+
+/** Bloquea (o libera) las tiradas de dados de un personaje. */
+export function setCharacterDiceLocked(id: string, locked: boolean) {
+  changeCampaign((c) => {
+    const ch = c.party.find((p) => p.id === id)
+    if (!ch) return
+    if (locked) ch.diceLocked = true
+    else delete ch.diceLocked
   })
 }
 
@@ -736,6 +879,74 @@ export function setRevealNpcNames(reveal: boolean) {
   })
 }
 
+/* ---------- Manual de monstruos e imágenes de referencia ---------- */
+
+/** Sólo links http(s) o imágenes subidas al servidor: nada de javascript: ni data: en la campaña. */
+export function isRefImageUrl(url: string): boolean {
+  if (url.startsWith('/uploads/')) return /^\/uploads\/[a-f0-9]{16}\.(png|jpg|gif|webp)$/.test(url)
+  try {
+    const u = new URL(url)
+    return (u.protocol === 'https:' || u.protocol === 'http:') && url.length <= 2000
+  } catch {
+    return false
+  }
+}
+
+export function addRefImage(key: string, url: string): boolean {
+  url = url.trim()
+  if (!isRefImageUrl(url)) return false
+  changeCampaign((c) => {
+    const all = (c.refImages ??= {})
+    const list = (all[key] ??= [])
+    if (!list.includes(url)) list.push(url)
+  })
+  return true
+}
+
+export function removeRefImage(key: string, url: string) {
+  changeCampaign((c) => {
+    const list = c.refImages?.[key]
+    if (!list) return
+    c.refImages![key] = list.filter((u) => u !== url)
+    if (!c.refImages![key].length) delete c.refImages![key]
+    if (c.showcase?.url === url) delete c.showcase
+  })
+}
+
+export function setRefQuery(key: string, q: string) {
+  changeCampaign((c) => {
+    const v = q.trim()
+    if (v) (c.refQueries ??= {})[key] = v
+    else if (c.refQueries) delete c.refQueries[key]
+  })
+}
+
+export function setRefImagesOff(off: boolean) {
+  changeCampaign((c) => {
+    if (off) {
+      c.refImagesOff = true
+      delete c.showcase
+    } else delete c.refImagesOff
+  })
+}
+
+/** Les muestra la imagen a los jugadores (o deja de mostrarla con url null). */
+export function showToPlayers(url: string | null, title?: string) {
+  changeCampaign((c) => {
+    if (!url || !isRefImageUrl(url)) delete c.showcase
+    else c.showcase = { id: newId('S'), url, ...(title?.trim() ? { title: title.trim() } : {}) }
+  })
+}
+
+export function setCharacterMonster(id: string, monster: string | undefined) {
+  changeMap((m) => {
+    const ch = m.characters.find((x) => x.id === id)
+    if (!ch) return
+    if (monster) ch.monster = monster
+    else delete ch.monster
+  })
+}
+
 export function revealCells(cells: [number, number][], reveal: boolean) {
   change((d) => {
     for (const [x, y] of cells) {
@@ -775,55 +986,75 @@ function charactersOnMap(m: Draft<MapDoc>): string[] {
   return [...ids]
 }
 
+/** Entrada nueva: el DM tira ya, salvo los personajes de jugadores, que quedan esperando su tirada. */
+function freshEntry(c: Draft<Campaign>, m: Draft<MapDoc>, id: string): CombatEntry {
+  const ch = charIn(c, m, id)
+  if (isPlayerOwned(ch) && !c.dmRollsInitiative) return { characterId: id, initiative: 0, pending: true }
+  return { characterId: id, initiative: d20() + (ch?.initiativeMod ?? 0) }
+}
+
 function sortOrderDraft(m: Draft<MapDoc>, c: Draft<Campaign>) {
-  const mod = (id: string) => charIn(c, m, id)?.initiativeMod ?? 0
-  m.combat.order.sort((a, b) => b.initiative - a.initiative || mod(b.characterId) - mod(a.characterId))
+  sortCombat(m, c.party)
 }
 
 export function startCombat() {
   changeMap((m, c) => {
-    const known = new Map(m.combat.order.map((e) => [e.characterId, e.initiative]))
-    m.combat.order = charactersOnMap(m).map((id) => ({
-      characterId: id,
-      initiative: known.get(id) ?? d20() + (charIn(c, m, id)?.initiativeMod ?? 0),
-    }))
-    sortOrderDraft(m, c)
+    const known = new Map(m.combat.order.map((e) => [e.characterId, e]))
+    m.combat.order = charactersOnMap(m).map((id) => known.get(id) ?? freshEntry(c, m, id))
     m.combat.active = true
     m.combat.round = 1
     m.combat.turnIndex = 0
+    sortOrderDraft(m, c)
   })
 }
 
 export function rerollInitiative() {
   changeMap((m, c) => {
-    for (const e of m.combat.order) e.initiative = d20() + (charIn(c, m, e.characterId)?.initiativeMod ?? 0)
-    sortOrderDraft(m, c)
+    m.combat.order = m.combat.order.map((e) => freshEntry(c, m, e.characterId))
     m.combat.turnIndex = 0
+    m.combat.round = 1
+    sortOrderDraft(m, c)
   })
 }
 
 export function setInitiative(characterId: string, value: number) {
   change((d) => {
     const e = d.combat.order.find((x) => x.characterId === characterId)
-    if (e) e.initiative = value
+    if (!e) return
+    e.initiative = value
+    delete e.pending
+  })
+}
+
+/** El DM tira por un jugador que todavía no tiró su iniciativa. */
+export function rollInitiativeFor(characterId: string) {
+  changeMap((m, c) => {
+    const e = m.combat.order.find((x) => x.characterId === characterId)
+    if (!e) return
+    e.initiative = d20() + (charIn(c, m, characterId)?.initiativeMod ?? 0)
+    delete e.pending
+    sortOrderDraft(m, c)
+  })
+}
+
+export function setDmRollsInitiative(on: boolean) {
+  changeCampaign((c) => {
+    if (on) c.dmRollsInitiative = true
+    else delete c.dmRollsInitiative
   })
 }
 
 export function sortInitiative() {
   changeMap((m, c) => {
-    const cur = m.combat.order[m.combat.turnIndex]?.characterId
     sortOrderDraft(m, c)
-    m.combat.turnIndex = Math.max(0, m.combat.order.findIndex((e) => e.characterId === cur))
   })
 }
 
 export function addToCombat(characterId: string) {
   changeMap((m, c) => {
     if (m.combat.order.some((e) => e.characterId === characterId)) return
-    const cur = m.combat.order[m.combat.turnIndex]?.characterId
-    m.combat.order.push({ characterId, initiative: d20() + (charIn(c, m, characterId)?.initiativeMod ?? 0) })
+    m.combat.order.push(freshEntry(c, m, characterId))
     sortOrderDraft(m, c)
-    m.combat.turnIndex = Math.max(0, m.combat.order.findIndex((e) => e.characterId === cur))
   })
 }
 

@@ -30,6 +30,11 @@ export type LogEntry = {
   result?: RollResult
   /** Tirada secreta de otro: se sabe que pasó, no qué salió. */
   hidden?: boolean
+  /**
+   * Firma que ven los jugadores cuando difiere de `name`: el DM tirando por un NPC cuyo nombre
+   * no está revelado ("DM (NPC 3)"). Nunca les llega el campo.
+   */
+  publicName?: string
 }
 
 export type ClientMsg =
@@ -46,7 +51,10 @@ export type ClientMsg =
   | { t: 'move'; characterId: string; x: number; y: number }
   | { t: 'char'; characterId: string; patch: Character }
   // Todos: tiradas y chat (el servidor tira los dados)
-  | { t: 'roll'; expr: string; label?: string; secret?: boolean }
+  /** `as`: el DM tira por un NPC (su id) y la tirada queda firmada con su nombre. */
+  | { t: 'roll'; expr: string; label?: string; secret?: boolean; as?: string }
+  /** El jugador tira la iniciativa pendiente de su personaje. */
+  | { t: 'initiative'; characterId: string }
   | { t: 'chat'; text: string; to?: string }
   /** Sólo el DM. */
   | { t: 'clearLog' }
@@ -63,3 +71,7 @@ export type ServerMsg =
   | { t: 'logEntry'; entry: LogEntry }
   /** Una tirada que no se pudo hacer: sólo a quien la pidió. */
   | { t: 'rollError'; message: string }
+  /** Sólo al jugador que tiró: cuánto tiene que esperar para la próxima tirada. */
+  | { t: 'rollCooldown'; ms: number }
+  /** Sólo al DM: la dirección pública del túnel (null si no hay). */
+  | { t: 'tunnel'; url: string | null }

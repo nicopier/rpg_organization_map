@@ -12,12 +12,14 @@ import {
   removePlayer,
   renamePlayer,
   revealAll,
+  setCharacterDiceLocked,
   setCharacterLocked,
   setFogEnabled,
 } from '../state/actions'
 import { pathOf } from '../model/tree'
 import { useMap, type TokenDraft } from '../state/mapStore'
 import { AssetPalette } from './AssetPalette'
+import { openCharacterSheet } from './Bestiary'
 import { ColorSwatches, CommitText, Segmented } from './fields'
 import { Icon } from './Icon'
 import { ImagePicker } from './ImagePicker'
@@ -142,6 +144,30 @@ export function PartyPanel() {
                 >
                   <Icon name={ch.moveLocked ? 'lock' : 'unlock'} size={13} />
                 </button>
+                <button
+                  className={`icon-btn tiny${ch.diceLocked ? ' locked' : ''}`}
+                  title={ch.diceLocked ? 'Dados bloqueados: no puede tirar. Clic para liberarlo.' : 'Bloquear sus tiradas de dados'}
+                  aria-pressed={!!ch.diceLocked}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setCharacterDiceLocked(ch.id, !ch.diceLocked)
+                  }}
+                >
+                  <Icon name="dice" size={13} />
+                </button>
+                {ch.sheet && (
+                  <button
+                    className="icon-btn tiny"
+                    title="Abrir su hoja de personaje"
+                    aria-label={`Abrir la hoja de ${ch.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openCharacterSheet(ch)
+                    }}
+                  >
+                    <Icon name="book" size={13} />
+                  </button>
+                )}
                 {!here && (
                   <button
                     className="small-btn"

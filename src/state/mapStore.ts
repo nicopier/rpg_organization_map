@@ -39,6 +39,8 @@ export type TokenDraft = {
   size: number
   image?: string
   characterId?: string
+  /** Criatura del Manual de monstruos. */
+  monster?: string
 }
 
 type HistoryEntry = { patches: Patch[]; inverse: Patch[] }

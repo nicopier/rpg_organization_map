@@ -5,6 +5,8 @@ import {
   endCombat,
   removeFromCombat,
   rerollInitiative,
+  rollInitiativeFor,
+  setDmRollsInitiative,
   setInitiative,
   sortInitiative,
   startCombat,
@@ -33,6 +35,7 @@ export function InitiativeTracker() {
   const isDm = useMap((s) => s.role === 'dm')
   const selectedIds = useMap((s) => (s.selection.type === 'items' ? s.selection.ids : NONE))
   const doc = useMap((s) => s.doc)
+  const dmRolls = useMap((s) => !!s.campaign.dmRollsInitiative)
   const byId = new Map([...party, ...npcs].map((c) => [c.id, c]))
 
   const tokensOnMap = doc.layers.some((l) => (l.kind === 'npc' || l.kind === 'game') && l.visible && l.items?.some((i) => i.characterId))
@@ -46,11 +49,13 @@ export function InitiativeTracker() {
         <button className="primary block" onClick={startCombat} disabled={!tokensOnMap}>
           <Icon name="sword" size={16} /> Iniciar combate
         </button>
+        <WhoRolls dmRolls={dmRolls} />
       </div>
     )
   }
 
   const current = combat.order[combat.turnIndex]?.characterId
+  const pending = combat.order.filter((e) => e.pending).length
 
   return (
     <div className="initiative">
@@ -94,7 +99,24 @@ export function InitiativeTracker() {
               className={`${isTurn ? 'turn' : ''}${down ? ' down' : ''}${selected ? ' selected' : ''}`}
               onClick={() => selectCharacter(c.id)}
             >
-              {isDm ? (
+              {e.pending ? (
+                isDm ? (
+                  <button
+                    className="init pending"
+                    title="Esperando que el jugador tire. Clic: tirás vos por él."
+                    onClick={(ev) => {
+                      ev.stopPropagation()
+                      rollInitiativeFor(c.id)
+                    }}
+                  >
+                    <Icon name="dice" size={14} />
+                  </button>
+                ) : (
+                  <span className="init pending" title="Todavía no tiró">
+                    …
+                  </span>
+                )
+              ) : isDm ? (
                 <CommitNumber
                   className="init"
                   value={e.initiative}
@@ -157,7 +179,23 @@ export function InitiativeTracker() {
           </button>
         )}
       </div>}
+      {isDm && pending > 0 && (
+        <p className="hint waiting-init">
+          <Icon name="dice" size={13} /> Esperando {pending === 1 ? 'la tirada de 1 jugador' : `las tiradas de ${pending} jugadores`}. Tocá el dado para tirar vos.
+        </p>
+      )}
+      {isDm && <WhoRolls dmRolls={dmRolls} />}
       {isDm && <p className="hint">Los NPC derrotados se saltean solos. Los PJ caídos conservan su turno para las tiradas de muerte.</p>}
     </div>
+  )
+}
+
+/** Quién tira la iniciativa de los personajes de los jugadores. */
+function WhoRolls({ dmRolls }: { dmRolls: boolean }) {
+  return (
+    <label className="check init-who" title="Apagado: al empezar el combate a cada jugador le aparece un cartel para tirar su iniciativa">
+      <input type="checkbox" checked={!dmRolls} onChange={(e) => setDmRollsInitiative(!e.target.checked)} />
+      Los jugadores tiran su iniciativa
+    </label>
   )
 }

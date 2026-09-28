@@ -12,9 +12,32 @@ export type NetState = {
   /** Ids de jugadores conectados ahora. */
   online: string[]
   error: string | null
+  /** DM: dirección pública del túnel activo (npm run tunnel), o null. */
+  tunnel: string | null
+  /** La última dirección de túnel con la que el DM copió o mandó los links. */
+  sharedTunnel: string | null
 }
 
-export const useNet = create<NetState>(() => ({ status: 'connecting', ready: false, online: [], error: null }))
+const SHARED_TUNNEL = 'mappaneitor:sharedTunnel'
+const readShared = () => {
+  try {
+    return localStorage.getItem(SHARED_TUNNEL)
+  } catch {
+    return null
+  }
+}
+
+export const useNet = create<NetState>(() => ({ status: 'connecting', ready: false, online: [], error: null, tunnel: null, sharedTunnel: readShared() }))
+
+/** El DM ya pasó los links con esta dirección: se apaga el aviso de "links nuevos". */
+export function markLinksShared(url: string) {
+  useNet.setState({ sharedTunnel: url })
+  try {
+    localStorage.setItem(SHARED_TUNNEL, url)
+  } catch {
+    // Sin almacenamiento: el aviso vuelve a aparecer al recargar, nada más.
+  }
+}
 
 const INVITE_KEY = 'mappaneitor:invite'
 
@@ -66,6 +89,8 @@ function open(hello: () => ClientMsg, onMessage: (m: ServerMsg) => void, onOpen?
       else if (msg.t === 'log') logActions.set(msg.entries)
       else if (msg.t === 'logEntry') logActions.add(msg.entry)
       else if (msg.t === 'rollError') logActions.error(msg.message)
+      else if (msg.t === 'rollCooldown') logActions.cooldown(msg.ms)
+      else if (msg.t === 'tunnel') useNet.setState({ tunnel: msg.url })
       else onMessage(msg)
     }
     ws.onclose = () => {
@@ -139,10 +164,27 @@ export function connectPlayer(): () => void {
   )
 }
 
+/** DM: sube un zip exportado y el servidor reemplaza la campaña; la nueva llega sola por el WebSocket. */
+export async function importCampaignZip(file: File): Promise<string> {
+  const res = await fetch('/api/import', { method: 'POST', body: file })
+  const body = (await res.json().catch(() => ({}))) as { name?: string; error?: string }
+  if (!res.ok) throw new Error(body.error ?? 'No se pudo importar la campaña.')
+  return body.name ?? 'la campaña'
+}
+
 export async function uploadImage(file: File): Promise<string> {
   const key = useMap.getState().role === 'player' ? inviteKey() : null
   const res = await fetch('/api/upload', { method: 'POST', body: file, headers: key ? { 'x-key': key } : {} })
   const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
   if (!res.ok || !body.url) throw new Error(body.error ?? 'No se pudo subir la imagen.')
+  return body.url
+}
+
+/** Sube (o reemplaza) la hoja de personaje en PDF. El servidor la guarda y actualiza la ficha. */
+export async function uploadSheet(characterId: string, file: File): Promise<string> {
+  const key = useMap.getState().role === 'player' ? inviteKey() : null
+  const res = await fetch('/api/sheet', { method: 'POST', body: file, headers: { 'x-character': characterId, ...(key ? { 'x-key': key } : {}) } })
+  const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
+  if (!res.ok || !body.url) throw new Error(body.error ?? 'No se pudo subir la hoja.')
   return body.url
 }
